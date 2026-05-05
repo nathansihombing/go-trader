@@ -309,7 +309,8 @@ func main() {
 		}
 		prices := fetchPricesForSummary(cfg)
 		sharpeByStrategy := ComputeSharpeByStrategy(LoadClosedPositionsByStrategy(stateDB, cfg), cfg, state)
-		if err := PostLeaderboard(cfg, state, prices, sharpeByStrategy, notifier); err != nil {
+		lifetimeStats := loadLifetimeStatsBestEffort(stateDB, "[leaderboard]")
+		if err := PostLeaderboard(cfg, state, prices, sharpeByStrategy, lifetimeStats, notifier); err != nil {
 			fmt.Fprintf(os.Stderr, "Leaderboard post failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -1660,14 +1661,7 @@ func main() {
 		// One DB round-trip per cycle; missing keys render as zero inside
 		// FormatCategorySummary. Errors are downgraded to a nil map so the
 		// summary still posts without in-memory lifetime counters (#472).
-		var lifetimeStats map[string]LifetimeTradeStats
-		if stateDB != nil {
-			if ls, err := stateDB.LifetimeTradeStatsAll(); err != nil {
-				fmt.Printf("[summary] lifetime trade stats unavailable: %v\n", err)
-			} else {
-				lifetimeStats = ls
-			}
-		}
+		lifetimeStats := loadLifetimeStatsBestEffort(stateDB, "[summary]")
 
 		// Notification — one message per channel per asset, sent to all backends.
 		if notifier.HasBackends() {
@@ -1743,7 +1737,7 @@ func main() {
 		// HTTPS latency can't stall the scheduler cycle.
 		var duePending []pendingLeaderboardSummary
 		if notifier.HasBackends() {
-			duePending = collectDueLeaderboardSummaries(cfg, state, prices, ComputeSharpeByStrategy(closedByStrategy, cfg, state))
+			duePending = collectDueLeaderboardSummaries(cfg, state, prices, ComputeSharpeByStrategy(closedByStrategy, cfg, state), lifetimeStats)
 		}
 
 		if err := SaveStateWithDB(state, cfg, stateDB); err != nil {
@@ -1799,7 +1793,7 @@ func main() {
 			} else {
 				sharpeByStrategy := ComputeSharpeByStrategy(closedByStrategy, cfg, state)
 				mu.RLock()
-				lbMessages := BuildLeaderboardMessages(cfg, state, prices, sharpeByStrategy)
+				lbMessages := BuildLeaderboardMessages(cfg, state, prices, sharpeByStrategy, lifetimeStats)
 				mu.RUnlock()
 				if len(lbMessages) == 0 {
 					fmt.Println("[leaderboard] Auto-post skipped: no strategy state to leaderboard yet")
@@ -1923,14 +1917,7 @@ func runSummaryAndExit(channelKey string, cfg *Config, state *AppState, sdb *Sta
 	// Format and send summary using the same asset-grouping logic as the main loop.
 	closedByStrategy := LoadClosedPositionsByStrategy(sdb, cfg)
 	rfr := RiskFreeRateOrDefault(cfg)
-	var lifetimeStats map[string]LifetimeTradeStats
-	if sdb != nil {
-		if ls, err := sdb.LifetimeTradeStatsAll(); err != nil {
-			fmt.Printf("[summary] lifetime trade stats unavailable: %v\n", err)
-		} else {
-			lifetimeStats = ls
-		}
-	}
+	lifetimeStats := loadLifetimeStatsBestEffort(sdb, "[summary]")
 	assetGroups, assetKeys := groupByAsset(chStrats)
 	if len(assetKeys) <= 1 {
 		chSharpe := aggregateSharpe(closedByStrategy, chStrats, state, rfr)
@@ -3234,9 +3221,10 @@ func fetchPricesForSummary(cfg *Config) map[string]float64 {
 func runLeaderboardSummariesAndExit(lcs []LeaderboardSummaryConfig, cfg *Config, state *AppState, sdb *StateDB, notifier *MultiNotifier) {
 	prices := fetchPricesForSummary(cfg)
 	sharpeByStrategy := ComputeSharpeByStrategy(LoadClosedPositionsByStrategy(sdb, cfg), cfg, state)
+	lifetimeStats := loadLifetimeStatsBestEffort(sdb, "[leaderboard]")
 	posted := 0
 	for _, lc := range lcs {
-		msg := BuildLeaderboardSummary(lc, cfg, state, prices, sharpeByStrategy)
+		msg := BuildLeaderboardSummary(lc, cfg, state, prices, sharpeByStrategy, lifetimeStats)
 		if msg == "" {
 			fmt.Fprintf(os.Stderr, "No strategies match leaderboard summary platform=%s ticker=%s\n", lc.Platform, lc.Ticker)
 			continue
@@ -3253,6 +3241,24 @@ func runLeaderboardSummariesAndExit(lcs []LeaderboardSummaryConfig, cfg *Config,
 	}
 	fmt.Printf("-summary=%s: posted %d leaderboard summaries, exiting.\n", lcs[0].Channel, posted)
 	os.Exit(0)
+}
+
+// loadLifetimeStatsBestEffort fetches per-strategy lifetime round-trip stats
+// from the trades table, downgrading errors to a nil map (the same fallback
+// FormatCategorySummary uses) so leaderboard #T / W/L columns render zero
+// instead of failing the post. logPrefix tags the warning when the DB read
+// fails ("[summary]" for the per-cycle paths, "[leaderboard]" for the
+// on-demand paths). (#580)
+func loadLifetimeStatsBestEffort(sdb *StateDB, logPrefix string) map[string]LifetimeTradeStats {
+	if sdb == nil {
+		return nil
+	}
+	stats, err := sdb.LifetimeTradeStatsAll()
+	if err != nil {
+		fmt.Printf("%s lifetime trade stats unavailable: %v\n", logPrefix, err)
+		return nil
+	}
+	return stats
 }
 
 func cloneTimeMap(in map[string]time.Time) map[string]time.Time {
@@ -3277,7 +3283,7 @@ type pendingLeaderboardSummary struct {
 // optimistically so duplicate posts are avoided if the caller's Discord send
 // fails; same semantics as the previous in-lock implementation. Caller must
 // hold the write lock on state. (#308)
-func collectDueLeaderboardSummaries(cfg *Config, state *AppState, prices map[string]float64, sharpeByStrategy map[string]float64) []pendingLeaderboardSummary {
+func collectDueLeaderboardSummaries(cfg *Config, state *AppState, prices map[string]float64, sharpeByStrategy map[string]float64, lifetimeStats map[string]LifetimeTradeStats) []pendingLeaderboardSummary {
 	if len(cfg.LeaderboardSummaries) == 0 {
 		return nil
 	}
@@ -3296,7 +3302,7 @@ func collectDueLeaderboardSummaries(cfg *Config, state *AppState, prices map[str
 		if !last.IsZero() && now.Sub(last) < freq {
 			continue
 		}
-		msg := BuildLeaderboardSummary(lc, cfg, state, prices, sharpeByStrategy)
+		msg := BuildLeaderboardSummary(lc, cfg, state, prices, sharpeByStrategy, lifetimeStats)
 		if msg == "" {
 			continue
 		}
