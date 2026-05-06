@@ -103,25 +103,26 @@ func (lc LeaderboardSummaryConfig) Key() string {
 
 // Config is the top-level scheduler configuration.
 type Config struct {
-	ConfigVersion        int                        `json:"config_version,omitempty"` // bumped when new fields are added; 0/missing = v1 baseline
-	IntervalSeconds      int                        `json:"interval_seconds"`
-	LogDir               string                     `json:"log_dir"`
-	DBFile               string                     `json:"db_file,omitempty"`     // SQLite state DB path (default: "scheduler/state.db")
-	StatusPort           int                        `json:"status_port,omitempty"` // HTTP status server port (default: 8099; auto-fallback if taken)
-	StatusToken          string                     `json:"-"`                     // loaded from STATUS_AUTH_TOKEN env var only
-	Discord              DiscordConfig              `json:"discord"`
-	Telegram             TelegramConfig             `json:"telegram,omitempty"`
-	AutoUpdate           string                     `json:"auto_update,omitempty"`           // "off", "daily", "heartbeat" (default: "off")
-	LeaderboardPostTime  string                     `json:"leaderboard_post_time,omitempty"` // "HH:MM" in UTC; auto-post daily leaderboard at this time (empty = disabled)
-	Strategies           []StrategyConfig           `json:"strategies"`
-	PortfolioRisk        *PortfolioRiskConfig       `json:"portfolio_risk,omitempty"`
-	Correlation          *CorrelationConfig         `json:"correlation,omitempty"`
-	Regime               *RegimeConfig              `json:"regime,omitempty"`
-	Platforms            map[string]*PlatformConfig `json:"platforms,omitempty"`
-	LeaderboardSummaries []LeaderboardSummaryConfig `json:"leaderboard_summaries,omitempty"` // #308 — configurable per-channel leaderboards
-	SummaryFrequency     map[string]string          `json:"summary_frequency,omitempty"`     // #30 — per-channel summary cadence; keys match Discord/Telegram channel keys (e.g. "spot", "options", "hyperliquid"). Values: Go duration ("30m", "2h"), alias ("hourly", "every"/"per_check"/"always"), or empty for legacy default (continuous: every channel run; spot: hourly)
-	RiskFreeRate         *float64                   `json:"risk_free_rate,omitempty"`        // #397 — annualized risk-free rate used in Sharpe-ratio calculations (e.g. 0.02 for 2%). Nil/missing falls back to DefaultAnnualRiskFreeRate; an explicit 0 is respected so backtest comparisons can pin to a 0% benchmark.
-	TradingViewExport    TradingViewExportConfig    `json:"tradingview_export,omitempty"`    // #3 — optional symbol overrides for TradingView portfolio CSV exports
+	ConfigVersion          int                        `json:"config_version,omitempty"` // bumped when new fields are added; 0/missing = v1 baseline
+	IntervalSeconds        int                        `json:"interval_seconds"`
+	LogDir                 string                     `json:"log_dir"`
+	DBFile                 string                     `json:"db_file,omitempty"`     // SQLite state DB path (default: "scheduler/state.db")
+	StatusPort             int                        `json:"status_port,omitempty"` // HTTP status server port (default: 8099; auto-fallback if taken)
+	StatusToken            string                     `json:"-"`                     // loaded from STATUS_AUTH_TOKEN env var only
+	Discord                DiscordConfig              `json:"discord"`
+	Telegram               TelegramConfig             `json:"telegram,omitempty"`
+	AutoUpdate             string                     `json:"auto_update,omitempty"`           // "off", "daily", "heartbeat" (default: "off")
+	LeaderboardPostTime    string                     `json:"leaderboard_post_time,omitempty"` // "HH:MM" in UTC; auto-post daily leaderboard at this time (empty = disabled)
+	Strategies             []StrategyConfig           `json:"strategies"`
+	PortfolioRisk          *PortfolioRiskConfig       `json:"portfolio_risk,omitempty"`
+	Correlation            *CorrelationConfig         `json:"correlation,omitempty"`
+	Regime                 *RegimeConfig              `json:"regime,omitempty"`
+	Platforms              map[string]*PlatformConfig `json:"platforms,omitempty"`
+	LeaderboardSummaries   []LeaderboardSummaryConfig `json:"leaderboard_summaries,omitempty"`      // #308 — configurable per-channel leaderboards
+	SummaryFrequency       map[string]string          `json:"summary_frequency,omitempty"`          // #30 — per-channel summary cadence; keys match Discord/Telegram channel keys (e.g. "spot", "options", "hyperliquid"). Values: Go duration ("30m", "2h"), alias ("hourly", "every"/"per_check"/"always"), or empty for legacy default (continuous: every channel run; spot: hourly)
+	RiskFreeRate           *float64                   `json:"risk_free_rate,omitempty"`             // #397 — annualized risk-free rate used in Sharpe-ratio calculations (e.g. 0.02 for 2%). Nil/missing falls back to DefaultAnnualRiskFreeRate; an explicit 0 is respected so backtest comparisons can pin to a 0% benchmark.
+	DefaultStopLossATRMult *float64                   `json:"default_stop_loss_atr_mult,omitempty"` // #605 — top-level default applied to HL perps/manual strategies that omit all stop_loss_* / trailing_stop_* fields. Nil/missing falls back to 1.0; explicit values let operators tune the ATR stop without recompiling.
+	TradingViewExport      TradingViewExportConfig    `json:"tradingview_export,omitempty"`         // #3 — optional symbol overrides for TradingView portfolio CSV exports
 }
 
 // ParseSummaryFrequency converts a summary_frequency value to a duration.
@@ -317,10 +318,10 @@ func ComputePerpsOpenNotional(sc StrategyConfig, cash float64) float64 {
 // at entry×0 / entry×2 on long/short legs.
 const MaxAutoStopLossPct = 50.0
 
-// DefaultStopLossATRMult is the fallback multiplier applied by LoadConfig to
-// sole-owner HL perps strategies that omit every stop_loss_* / trailing_stop_*
-// field. 1.0× ATR gives a sensible volatility-adjusted exchange-side stop on
-// fresh opens without any operator config (#562).
+// DefaultStopLossATRMult is the fallback value for Config.DefaultStopLossATRMult
+// when the top-level config omits default_stop_loss_atr_mult. 1.0× ATR gives a
+// sensible volatility-adjusted exchange-side stop on fresh opens without any
+// operator config (#562/#605).
 const DefaultStopLossATRMult = 1.0
 
 // EffectiveStopLossPct returns the price % to use as the HL reduce-only stop-loss
@@ -339,13 +340,13 @@ const DefaultStopLossATRMult = 1.0
 //  3. Explicit TrailingStopPct (nil → fall through; explicit 0 → disabled).
 //  4. Explicit StopLossPct (nil → fall through; explicit 0 → disabled).
 //  5. StopLossMarginPct / Leverage (nil → fall through; explicit 0 → disabled).
-//  6. MaxDrawdownPct as a fallback so a sole-owner HL perps strategy with a
-//     configured drawdown automatically gets exchange-side protection. Capped
-//     at MaxAutoStopLossPct. Only applies to single-strategy coins because
-//     LoadConfig normalizes omitted stop_loss_* / trailing_stop_* fields to
-//     explicit 0 for same-coin HL peer strategies (#494). LoadConfig now also
-//     defaults sole-owners with no explicit stop fields to StopLossATRMult=1.0
-//     (#562) so this fallback is rarely reached in practice.
+//  6. MaxDrawdownPct as a fallback for any HL perps strategy where all five
+//     stop fields are nil. Capped at MaxAutoStopLossPct. Rarely reached in
+//     practice because LoadConfig defaults all-five-omitted strategies
+//     (including shared-coin peers since #601) to Config.DefaultStopLossATRMult
+//     (#562/#605); only strategies that opt out via default_stop_loss_atr_mult=0
+//     (or an explicit per-strategy stop_loss_atr_mult=0 with no other stop
+//     field set) can reach this fallback.
 //
 // HL perps only — returns 0 for non-HL platforms or non-perps types so the
 // caller can skip the trigger placement unconditionally.
@@ -428,6 +429,13 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.AutoUpdate == "" {
 		cfg.AutoUpdate = "off"
+	}
+	if cfg.DefaultStopLossATRMult == nil {
+		defaultMult := DefaultStopLossATRMult
+		cfg.DefaultStopLossATRMult = &defaultMult
+	}
+	if *cfg.DefaultStopLossATRMult < 0 {
+		return nil, fmt.Errorf("default_stop_loss_atr_mult must be >= 0, got %g", *cfg.DefaultStopLossATRMult)
 	}
 
 	// Bounds-check status_port. Reject privileged ports (<1024 needs root)
@@ -559,20 +567,26 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
-	// #562/#601: Default HL perps strategies with no explicit stop-loss /
-	// trailing-stop fields to stop_loss_atr_mult=1.0. Volatility-adjusted
+	// #562/#601/#605: Default HL perps strategies with no explicit stop-loss /
+	// trailing-stop fields to the configurable top-level
+	// default_stop_loss_atr_mult (1.0× ATR by default). Volatility-adjusted
 	// exchange-side protection out of the box. Shared-coin peers are included
 	// because #601 places per-strategy sized reduce-only orders instead of one
-	// shared trigger owner.
-	for i := range cfg.Strategies {
-		sc := &cfg.Strategies[i]
-		if sc.Type != "perps" || sc.Platform != "hyperliquid" {
-			continue
-		}
-		if sc.StopLossPct == nil && sc.StopLossMarginPct == nil && sc.TrailingStopPct == nil && sc.TrailingStopATRMult == nil && sc.StopLossATRMult == nil {
-			defaultMult := DefaultStopLossATRMult
-			sc.StopLossATRMult = &defaultMult
-			fmt.Printf("[INFO] %s: applied default stop_loss_atr_mult=%.1f (no stop fields set; set stop_loss_atr_mult=0 to opt out)\n", sc.ID, DefaultStopLossATRMult)
+	// shared trigger owner. An explicit default_stop_loss_atr_mult=0 opts out
+	// of the auto-default entirely so the per-strategy MaxDrawdownPct fallback
+	// in EffectiveStopLossPct stays in play.
+	defaultStopLossATRMult := *cfg.DefaultStopLossATRMult
+	if defaultStopLossATRMult > 0 {
+		for i := range cfg.Strategies {
+			sc := &cfg.Strategies[i]
+			if sc.Type != "perps" || sc.Platform != "hyperliquid" {
+				continue
+			}
+			if sc.StopLossPct == nil && sc.StopLossMarginPct == nil && sc.TrailingStopPct == nil && sc.TrailingStopATRMult == nil && sc.StopLossATRMult == nil {
+				defaultMult := defaultStopLossATRMult
+				sc.StopLossATRMult = &defaultMult
+				fmt.Printf("[INFO] %s: applied default stop_loss_atr_mult=%g (no stop fields set; set stop_loss_atr_mult=0 or default_stop_loss_atr_mult=0 to opt out)\n", sc.ID, defaultStopLossATRMult)
+			}
 		}
 	}
 
@@ -600,7 +614,7 @@ func LoadConfig(path string) (*Config, error) {
 			sc.CloseStrategies = []string{"tiered_tp_atr_live"}
 		}
 		if sc.StopLossATRMult == nil {
-			defaultMult := DefaultStopLossATRMult
+			defaultMult := defaultStopLossATRMult
 			sc.StopLossATRMult = &defaultMult
 		}
 		if sc.Params == nil {

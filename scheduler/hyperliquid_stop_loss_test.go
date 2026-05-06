@@ -2081,8 +2081,9 @@ func TestHyperliquidPeerStrategyErrors_FixedATRMultAllowed(t *testing.T) {
 	}
 }
 
-// #562/#601: LoadConfig defaults HL perps strategies with no explicit stop
-// fields to stop_loss_atr_mult=1.0, including shared-coin peers.
+// #562/#601/#605: LoadConfig defaults HL perps strategies with no explicit
+// stop fields to default_stop_loss_atr_mult (1.0× ATR by default), including
+// shared-coin peers since #601 sizes reduce-only stops per strategy.
 func TestLoadConfig_DefaultsStopLossATRMultForSoleOwner(t *testing.T) {
 	dir := t.TempDir()
 	cfgJSON := `{
@@ -2108,6 +2109,35 @@ func TestLoadConfig_DefaultsStopLossATRMultForSoleOwner(t *testing.T) {
 	}
 	if *sc.StopLossATRMult != DefaultStopLossATRMult {
 		t.Errorf("default StopLossATRMult = %g, want %g", *sc.StopLossATRMult, DefaultStopLossATRMult)
+	}
+}
+
+func TestLoadConfig_UsesConfiguredDefaultStopLossATRMult(t *testing.T) {
+	dir := t.TempDir()
+	cfgJSON := `{
+		"default_stop_loss_atr_mult": 1.5,
+		"strategies": [{
+			"id": "hl-sole",
+			"type": "perps",
+			"platform": "hyperliquid",
+			"script": "shared_scripts/check_hyperliquid.py",
+			"args": ["sma_crossover", "ETH", "1h", "--mode=paper"],
+			"capital": 1000,
+			"max_drawdown_pct": 10,
+			"leverage": 5
+		}]
+	}`
+	path := writeTestConfig(t, dir, cfgJSON)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.DefaultStopLossATRMult == nil || *cfg.DefaultStopLossATRMult != 1.5 {
+		t.Fatalf("DefaultStopLossATRMult = %v, want 1.5", cfg.DefaultStopLossATRMult)
+	}
+	sc := cfg.Strategies[0]
+	if sc.StopLossATRMult == nil || *sc.StopLossATRMult != 1.5 {
+		t.Fatalf("strategy StopLossATRMult = %v, want 1.5", sc.StopLossATRMult)
 	}
 }
 
@@ -2138,8 +2168,8 @@ func TestLoadConfig_NoDefaultStopLossATRMultWhenExplicitFieldSet(t *testing.T) {
 	}
 }
 
-// #601: peer strategies on the same coin receive the default ATR stop because
-// exchange-side orders are sized per strategy.
+// #601/#605: peer strategies on the same coin receive the default ATR stop
+// because exchange-side orders are sized per strategy.
 func TestLoadConfig_DefaultStopLossATRMultForPeers(t *testing.T) {
 	dir := t.TempDir()
 	cfgJSON := `{
@@ -2179,6 +2209,81 @@ func TestLoadConfig_DefaultStopLossATRMultForPeers(t *testing.T) {
 				t.Errorf("peer StopLossPct = %v, want nil", sc.StopLossPct)
 			}
 		}
+	}
+}
+
+// #601/#605: when no peer owns an explicit stop, every peer receives the
+// configured top-level default — #601 sizes reduce-only protection per
+// strategy, so peers no longer share a single owner.
+func TestLoadConfig_ConfiguredDefaultAppliesToAllPeers(t *testing.T) {
+	dir := t.TempDir()
+	cfgJSON := `{
+		"default_stop_loss_atr_mult": 1.5,
+		"strategies": [
+			{
+				"id": "hl-eth-ztrend",
+				"type": "perps",
+				"platform": "hyperliquid",
+				"script": "shared_scripts/check_hyperliquid.py",
+				"args": ["ztrend", "ETH", "1h"],
+				"capital": 1000,
+				"leverage": 5
+			},
+			{
+				"id": "hl-eth-breakout",
+				"type": "perps",
+				"platform": "hyperliquid",
+				"script": "shared_scripts/check_hyperliquid.py",
+				"args": ["breakout", "ETH", "1h"],
+				"capital": 1000,
+				"leverage": 5
+			}
+		]
+	}`
+	path := writeTestConfig(t, dir, cfgJSON)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	for _, sc := range cfg.Strategies {
+		if sc.StopLossATRMult == nil || *sc.StopLossATRMult != 1.5 {
+			t.Errorf("%s StopLossATRMult = %v, want 1.5", sc.ID, sc.StopLossATRMult)
+		}
+		if sc.StopLossPct != nil {
+			t.Errorf("%s StopLossPct = %v, want nil", sc.ID, sc.StopLossPct)
+		}
+	}
+}
+
+// #605: explicit default_stop_loss_atr_mult=0 opts out of the auto-default
+// entirely; HL perps strategies with all stop fields omitted keep nil so
+// EffectiveStopLossPct's MaxDrawdownPct fallback can still apply.
+func TestLoadConfig_DefaultStopLossATRMultZeroOptsOut(t *testing.T) {
+	dir := t.TempDir()
+	cfgJSON := `{
+		"default_stop_loss_atr_mult": 0,
+		"strategies": [{
+			"id": "hl-optout",
+			"type": "perps",
+			"platform": "hyperliquid",
+			"script": "shared_scripts/check_hyperliquid.py",
+			"args": ["sma_crossover", "ETH", "1h", "--mode=paper"],
+			"capital": 1000,
+			"max_drawdown_pct": 10,
+			"leverage": 5
+		}]
+	}`
+	path := writeTestConfig(t, dir, cfgJSON)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	sc := cfg.Strategies[0]
+	if sc.StopLossATRMult != nil {
+		t.Errorf("StopLossATRMult = %v, want nil (default opted out)", sc.StopLossATRMult)
+	}
+	if sc.StopLossPct != nil {
+		t.Errorf("StopLossPct = %v, want nil", sc.StopLossPct)
 	}
 }
 
