@@ -200,38 +200,47 @@ type FuturesConfig struct {
 	MaxContracts   int     `json:"max_contracts,omitempty"`
 }
 
+// StrategyRef pairs a strategy name with its evaluator params. Used for both
+// the open strategy and each close strategy on a StrategyConfig so per-strategy
+// params don't leak across roles (#640). Empty Params means "use registry
+// defaults"; the open and close registries each merge their default_params
+// over user-provided keys at evaluation time.
+type StrategyRef struct {
+	Name   string                 `json:"name"`
+	Params map[string]interface{} `json:"params,omitempty"`
+}
+
 // StrategyConfig describes a single strategy job.
 type StrategyConfig struct {
-	ID                     string                 `json:"id"`
-	Type                   string                 `json:"type"`                // "spot", "options", "perps", "futures", or "manual"
-	Platform               string                 `json:"platform"`            // "deribit", "ibkr", "binanceus", "hyperliquid", "topstep"
-	Symbol                 string                 `json:"symbol,omitempty"`    // manual strategies: trading symbol (e.g. "ETH")
-	Timeframe              string                 `json:"timeframe,omitempty"` // manual strategies: OHLCV timeframe (e.g. "1h")
-	Script                 string                 `json:"script"`
-	Args                   []string               `json:"args"`
-	OpenStrategy           string                 `json:"open_strategy,omitempty"`    // optional entry strategy override; defaults to Args[0] for backwards compatibility (#480)
-	CloseStrategies        []string               `json:"close_strategies,omitempty"` // optional exit strategy list; max close_fraction wins (#480)
-	AllowedRegimes         []string               `json:"allowed_regimes,omitempty"`  // gate entries: skip signal when current regime not in this list; empty = allow all (#482)
-	Capital                float64                `json:"capital"`
-	CapitalPct             float64                `json:"capital_pct,omitempty"`     // 0-1; dynamic capital = wallet_balance * capital_pct (overrides capital)
-	InitialCapital         float64                `json:"initial_capital,omitempty"` // fixed starting balance for PnL display (never overwritten by capital_pct)
-	MaxDrawdownPct         float64                `json:"max_drawdown_pct"`
-	IntervalSeconds        int                    `json:"interval_seconds,omitempty"`           // per-strategy override (0 = use global)
-	HTFFilter              bool                   `json:"htf_filter,omitempty"`                 // higher-timeframe trend filter
-	AllowShorts            bool                   `json:"allow_shorts,omitempty"`               // perps only: opt-in to bidirectional execution — signal=-1 from flat opens a short, long+(-1) closes-and-flips. Default false preserves close-long-only behavior for strategies like triple_ema that emit -1 only as a long-exit (#328)
-	Leverage               float64                `json:"leverage,omitempty"`                   // perps exchange leverage (default 1 = no leverage); used for exchange margin/risk and HL update_leverage (#254/#497)
-	SizingLeverage         float64                `json:"sizing_leverage,omitempty"`            // perps notional multiplier; defaults to Leverage for backwards compatibility (#497). Notional formula: notional = cash * sizing_leverage; size = notional / price. For margin-based sizing, prefer MarginPerTradeUSD (#518).
-	MarginPerTradeUSD      *float64               `json:"margin_per_trade_usd,omitempty"`       // perps only: USD margin to deploy per open. When set (positive), overrides SizingLeverage: notional = min(MarginPerTradeUSD, cash) * exchange_leverage; size = notional / price. Lets operators size in margin-space directly so high exchange_leverage doesn't decouple intent from outcome (#518).
-	StopLossPct            *float64               `json:"stop_loss_pct,omitempty"`              // HL perps only: % from entry to place a reduce-only stop-loss trigger. Pointer so omitted (nil) falls through to StopLossMarginPct then MaxDrawdownPct for single-coin strategies (#484); LoadConfig normalizes omitted same-coin peers to explicit 0 (#494); explicit 0 disables auto-SL (#412)
-	StopLossMarginPct      *float64               `json:"stop_loss_margin_pct,omitempty"`       // HL perps only: % of deployed margin to lose before stop-loss trigger; mutually exclusive with stop_loss_pct; price % derived as StopLossMarginPct / Leverage at order time. Pointer so omitted falls through to MaxDrawdownPct for single-coin strategies; LoadConfig normalizes omitted same-coin peers to explicit 0 (#494); explicit 0 disables (#487, #484)
-	TrailingStopPct        *float64               `json:"trailing_stop_pct,omitempty"`          // HL perps only: synthetic trailing SL distance from the best mark seen while open; mutually exclusive with stop_loss_pct and stop_loss_margin_pct (#501)
-	TrailingStopATRMult    *float64               `json:"trailing_stop_atr_mult,omitempty"`     // HL perps only: trailing SL distance derived from entry ATR at open (effective_pct = mult * entry_atr / avg_cost * 100); fixed for the life of the position; mutually exclusive with trailing_stop_pct, stop_loss_pct, stop_loss_margin_pct (#505)
-	StopLossATRMult        *float64               `json:"stop_loss_atr_mult,omitempty"`         // HL perps only: fixed (non-trailing) SL distance derived from entry ATR at open (trigger_px = avg_cost ± mult * entry_atr); armed once on the cycle after open and never updated; mutually exclusive with stop_loss_pct, stop_loss_margin_pct, trailing_stop_pct, trailing_stop_atr_mult. When all five stop fields are omitted on a sole-owner HL perps strategy, LoadConfig defaults this to 1.0 so every position has volatility-adjusted exchange-side protection (#562)
-	TrailingStopMinMovePct *float64               `json:"trailing_stop_min_move_pct,omitempty"` // HL perps trailing SL only: minimum trigger-price move before cancel/replace; nil defaults to 0.5% (#501)
-	MarginMode             string                 `json:"margin_mode,omitempty"`                // HL perps only: "isolated" (default) or "cross"; sent via update_leverage on fresh opens to enforce per-position liq isolation (#486)
-	Params                 map[string]interface{} `json:"params,omitempty"`                     // custom strategy parameters passed to Python
-	ThetaHarvest           *ThetaHarvestConfig    `json:"theta_harvest,omitempty"`
-	FuturesConfig          *FuturesConfig         `json:"futures,omitempty"`
+	ID                     string              `json:"id"`
+	Type                   string              `json:"type"`                // "spot", "options", "perps", "futures", or "manual"
+	Platform               string              `json:"platform"`            // "deribit", "ibkr", "binanceus", "hyperliquid", "topstep"
+	Symbol                 string              `json:"symbol,omitempty"`    // manual strategies: trading symbol (e.g. "ETH")
+	Timeframe              string              `json:"timeframe,omitempty"` // manual strategies: OHLCV timeframe (e.g. "1h")
+	Script                 string              `json:"script"`
+	Args                   []string            `json:"args"`
+	OpenStrategy           StrategyRef         `json:"open_strategy"`              // entry strategy ref (name + params). Migrated from legacy string-typed open_strategy / args[0] in v13 (#640)
+	CloseStrategies        []StrategyRef       `json:"close_strategies,omitempty"` // exit strategy refs (name + params); max close_fraction wins (#480). Migrated from legacy []string in v13 (#640)
+	AllowedRegimes         []string            `json:"allowed_regimes,omitempty"`  // gate entries: skip signal when current regime not in this list; empty = allow all (#482)
+	Capital                float64             `json:"capital"`
+	CapitalPct             float64             `json:"capital_pct,omitempty"`     // 0-1; dynamic capital = wallet_balance * capital_pct (overrides capital)
+	InitialCapital         float64             `json:"initial_capital,omitempty"` // fixed starting balance for PnL display (never overwritten by capital_pct)
+	MaxDrawdownPct         float64             `json:"max_drawdown_pct"`
+	IntervalSeconds        int                 `json:"interval_seconds,omitempty"`           // per-strategy override (0 = use global)
+	HTFFilter              bool                `json:"htf_filter,omitempty"`                 // higher-timeframe trend filter
+	AllowShorts            bool                `json:"allow_shorts,omitempty"`               // perps only: opt-in to bidirectional execution — signal=-1 from flat opens a short, long+(-1) closes-and-flips. Default false preserves close-long-only behavior for strategies like triple_ema that emit -1 only as a long-exit (#328)
+	Leverage               float64             `json:"leverage,omitempty"`                   // perps exchange leverage (default 1 = no leverage); used for exchange margin/risk and HL update_leverage (#254/#497)
+	SizingLeverage         float64             `json:"sizing_leverage,omitempty"`            // perps notional multiplier; defaults to Leverage for backwards compatibility (#497). Notional formula: notional = cash * sizing_leverage; size = notional / price. For margin-based sizing, prefer MarginPerTradeUSD (#518).
+	MarginPerTradeUSD      *float64            `json:"margin_per_trade_usd,omitempty"`       // perps only: USD margin to deploy per open. When set (positive), overrides SizingLeverage: notional = min(MarginPerTradeUSD, cash) * exchange_leverage; size = notional / price. Lets operators size in margin-space directly so high exchange_leverage doesn't decouple intent from outcome (#518).
+	StopLossPct            *float64            `json:"stop_loss_pct,omitempty"`              // HL perps only: % from entry to place a reduce-only stop-loss trigger. Pointer so omitted (nil) falls through to StopLossMarginPct then MaxDrawdownPct for single-coin strategies (#484); LoadConfig normalizes omitted same-coin peers to explicit 0 (#494); explicit 0 disables auto-SL (#412)
+	StopLossMarginPct      *float64            `json:"stop_loss_margin_pct,omitempty"`       // HL perps only: % of deployed margin to lose before stop-loss trigger; mutually exclusive with stop_loss_pct; price % derived as StopLossMarginPct / Leverage at order time. Pointer so omitted falls through to MaxDrawdownPct for single-coin strategies; LoadConfig normalizes omitted same-coin peers to explicit 0 (#494); explicit 0 disables (#487, #484)
+	TrailingStopPct        *float64            `json:"trailing_stop_pct,omitempty"`          // HL perps only: synthetic trailing SL distance from the best mark seen while open; mutually exclusive with stop_loss_pct and stop_loss_margin_pct (#501)
+	TrailingStopATRMult    *float64            `json:"trailing_stop_atr_mult,omitempty"`     // HL perps only: trailing SL distance derived from entry ATR at open (effective_pct = mult * entry_atr / avg_cost * 100); fixed for the life of the position; mutually exclusive with trailing_stop_pct, stop_loss_pct, stop_loss_margin_pct (#505)
+	StopLossATRMult        *float64            `json:"stop_loss_atr_mult,omitempty"`         // HL perps only: fixed (non-trailing) SL distance derived from entry ATR at open (trigger_px = avg_cost ± mult * entry_atr); armed once on the cycle after open and never updated; mutually exclusive with stop_loss_pct, stop_loss_margin_pct, trailing_stop_pct, trailing_stop_atr_mult. When all five stop fields are omitted on a sole-owner HL perps strategy, LoadConfig defaults this to 1.0 so every position has volatility-adjusted exchange-side protection (#562)
+	TrailingStopMinMovePct *float64            `json:"trailing_stop_min_move_pct,omitempty"` // HL perps trailing SL only: minimum trigger-price move before cancel/replace; nil defaults to 0.5% (#501)
+	MarginMode             string              `json:"margin_mode,omitempty"`                // HL perps only: "isolated" (default) or "cross"; sent via update_leverage on fresh opens to enforce per-position liq isolation (#486)
+	ThetaHarvest           *ThetaHarvestConfig `json:"theta_harvest,omitempty"`
+	FuturesConfig          *FuturesConfig      `json:"futures,omitempty"`
 }
 
 // EffectiveSizingLeverage returns the notional-sizing multiplier for perps.
@@ -413,6 +422,21 @@ func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
+	}
+	// #640: v13 introduced co-located StrategyRef shape, which is a type-changing
+	// migration json.Unmarshal cannot do on its own. Detect pre-v13 configs and
+	// run the schema rewrite synchronously before parsing — MigrateConfig writes
+	// the migrated JSON back to disk so downstream loads see the new shape and
+	// the async DM-based field migration (runConfigMigrationDM) finds the file
+	// already at the current version.
+	if needsV13SchemaMigration(data) {
+		if err := MigrateConfig(path, nil, nil); err != nil {
+			return nil, fmt.Errorf("v13 schema migration: %w", err)
+		}
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read config after v13 migration: %w", err)
+		}
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
@@ -611,19 +635,28 @@ func LoadConfig(path string) (*Config, error) {
 			sc.MarginMode = "isolated"
 		}
 		if len(sc.CloseStrategies) == 0 {
-			sc.CloseStrategies = []string{"tiered_tp_atr_live"}
+			sc.CloseStrategies = []StrategyRef{{Name: "tiered_tp_atr_live"}}
 		}
 		if sc.StopLossATRMult == nil {
 			defaultMult := defaultStopLossATRMult
 			sc.StopLossATRMult = &defaultMult
 		}
-		if sc.Params == nil {
-			sc.Params = map[string]interface{}{}
-		}
-		if _, hasTP := sc.Params["tiers"]; !hasTP {
-			sc.Params["tiers"] = []interface{}{
-				map[string]interface{}{"atr_multiple": 2.0, "close_fraction": 0.5},
-				map[string]interface{}{"atr_multiple": 3.0, "close_fraction": 1.0},
+		// Default TP tiers for manual strategies onto the matching close ref.
+		// Only the tiered_tp_atr* close evaluators consume `tiers`; if the
+		// operator overrode CloseStrategies to something else, leave it alone.
+		for j := range sc.CloseStrategies {
+			cs := &sc.CloseStrategies[j]
+			if cs.Name != "tiered_tp_atr" && cs.Name != "tiered_tp_atr_live" {
+				continue
+			}
+			if cs.Params == nil {
+				cs.Params = map[string]interface{}{}
+			}
+			if _, hasTP := cs.Params["tiers"]; !hasTP {
+				cs.Params["tiers"] = []interface{}{
+					map[string]interface{}{"atr_multiple": 2.0, "close_fraction": 0.5},
+					map[string]interface{}{"atr_multiple": 3.0, "close_fraction": 1.0},
+				}
 			}
 		}
 	}
@@ -929,16 +962,19 @@ func ValidateConfig(cfg *Config) error {
 		if sc.Type != "spot" && sc.Type != "options" && sc.Type != "perps" && sc.Type != "futures" && sc.Type != "manual" {
 			errs = append(errs, fmt.Sprintf("%s: type must be \"spot\", \"options\", \"perps\", \"futures\", or \"manual\", got %q", prefix, sc.Type))
 		}
-		if usesOpenCloseConfig(sc) && sc.Type == "options" {
-			errs = append(errs, fmt.Sprintf("%s: open_strategy/close_strategies are supported for spot, perps, and futures strategies only", prefix))
+		// Options strategies don't compose close evaluators yet. open_strategy
+		// is allowed as canonical metadata (post-v13 it mirrors args[0]); only
+		// close_strategies remain rejected here.
+		if len(sc.CloseStrategies) > 0 && sc.Type == "options" {
+			errs = append(errs, fmt.Sprintf("%s: close_strategies are supported for spot, perps, and futures strategies only", prefix))
 		}
-		if sc.OpenStrategy != "" {
-			if err := validateStrategyConceptName(sc.OpenStrategy); err != nil {
+		if sc.OpenStrategy.Name != "" {
+			if err := validateStrategyConceptName(sc.OpenStrategy.Name); err != nil {
 				errs = append(errs, fmt.Sprintf("%s: open_strategy %v", prefix, err))
 			}
 		}
-		for j, name := range sc.CloseStrategies {
-			if err := validateStrategyConceptName(name); err != nil {
+		for j, ref := range sc.CloseStrategies {
+			if err := validateStrategyConceptName(ref.Name); err != nil {
 				errs = append(errs, fmt.Sprintf("%s: close_strategies[%d] %v", prefix, j, err))
 			}
 		}
