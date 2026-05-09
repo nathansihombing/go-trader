@@ -240,6 +240,224 @@ func reconcileHyperliquidPositions(stratState *StrategyState, sym string, positi
 	return reconcileHyperliquidPositionsWithResolver(stratState, sym, positions, directHyperliquidReconcileFillResolver(accountAddress), logger)
 }
 
+// reconcileHyperliquidPositionsForStrategy is the production entry point with
+// strategy-config awareness. It first attempts to attribute partial / full
+// closes to a cleared TP tier (sole-owner mirror of shared-coin Detector 3 —
+// ambiguity is moot here because exactly one strategy owns sym), books the
+// close at the configured TP price (or the userFills px when available), and
+// only falls through to the legacy quantity-resync / SL-fallback path when no
+// TP attribution is found.
+//
+// Without this hook, partial TP fills on a sole-owner perps strategy are
+// silently absorbed by the legacy reconciler — qty resync hides the close,
+// no Trade row is written, s.Cash drifts from the on-chain account value, and
+// the operator never sees a DM. Full closes attributable to the final TP tier
+// were also booked at the SL trigger price (when SLOID was still set) instead
+// of the TP price (#670).
+//
+// pendingAlerts (when non-nil) collects ProtectionFillAlert entries for owner
+// DM emission after mu.Unlock — same pattern shared-coin detectors use so HTTP
+// notifier calls don't extend the locked critical section.
+func reconcileHyperliquidPositionsForStrategy(
+	sc StrategyConfig,
+	stratState *StrategyState,
+	sym string,
+	positions []HLPosition,
+	resolveFee hlReconcileFillResolver,
+	logger *StrategyLogger,
+	pendingAlerts *[]ProtectionFillAlert,
+) bool {
+	if stratState == nil || sym == "" {
+		return false
+	}
+
+	if booked := tryBookSoleOwnerTPFill(sc, stratState, sym, positions, resolveFee, logger, pendingAlerts); booked {
+		// pos.Quantity has been shrunk (partial) or the position removed (full)
+		// by the booker; the legacy reconciler's qty/side/avgCost resync will
+		// no-op because virtual now matches on-chain. Continue through it for
+		// idempotent housekeeping (multiplier migration, leverage seed).
+		reconcileHyperliquidPositionsWithResolver(stratState, sym, positions, resolveFee, logger)
+		return true
+	}
+
+	return reconcileHyperliquidPositionsWithResolver(stratState, sym, positions, resolveFee, logger)
+}
+
+// tryBookSoleOwnerTPFill is the sole-owner TP attribution helper. Returns true
+// when a TP-tier fill was detected and booked via
+// recordPerpsExternalPartialCloseWithFillFee — covers both the partial-drop
+// case (on-chain qty < virtual qty, same direction) and the full-close case
+// (on-chain flat, ALL TP tiers cleared). When no TP attribution applies,
+// returns false so the caller falls through to the legacy reconciler.
+//
+// Two attribution paths handle the cycle-ordering interaction with
+// applyHyperliquidProtectionSync (which runs in the per-strategy phase, AFTER
+// this pre-phase reconcile):
+//
+//  1. Cleared-tier path — pos.TPOIDs[i]==0, set by applyHyperliquidProtectionSync
+//     after Python observes the userFills entry for that OID. Reliable signal
+//     but lags the fill by one cycle.
+//  2. Cycle-ordering recovery path — pos.TPOIDs[i] still positive but the
+//     userFills resolver returns a matched fill whose OID equals one of the
+//     configured TPOIDs. Closes the (protection-sync, next-reconcile) window
+//     where legacy resync would otherwise wipe the drift signal before
+//     protection-sync zeros the TPOID. Restricted to the partial path:
+//     full-close attribution still requires all-tiers-cleared per finding #1.
+//
+// Precision: the recovery path's OID match against pos.TPOIDs is exact, so SL
+// fills (lookup.OID == pos.StopLossOID) and operator/CB closes (different OID)
+// don't mis-attribute. The booker shrinks pos.Quantity to match on-chain so a
+// later same-cycle protection-sync sees the fill, zeros TPOIDs[i] normally,
+// and the next cycle's reconcile finds no drift — no double-booking.
+func tryBookSoleOwnerTPFill(
+	sc StrategyConfig,
+	stratState *StrategyState,
+	sym string,
+	positions []HLPosition,
+	resolveFee hlReconcileFillResolver,
+	logger *StrategyLogger,
+	pendingAlerts *[]ProtectionFillAlert,
+) bool {
+	statePos := stratState.Positions[sym]
+	if statePos == nil || statePos.Quantity <= 0 {
+		return false
+	}
+	if statePos.AvgCost <= 0 || statePos.EntryATR <= 0 {
+		// TP price computation needs AvgCost + EntryATR; without them we
+		// can't attribute. Fall back to the legacy reconciler.
+		return false
+	}
+
+	var onChainPos *HLPosition
+	for i := range positions {
+		if positions[i].Coin == sym {
+			onChainPos = &positions[i]
+			break
+		}
+	}
+
+	var closeQty float64
+	if onChainPos == nil {
+		// Full-close path: only attribute to a TP tier when ALL configured TP
+		// OIDs are zero (i.e. final tier flatten — the "all tiers gone"
+		// branch of hyperliquidClearedTPTier). If any tier is still active, a
+		// later SL fire / operator close / kill-switch on the residual after a
+		// prior partial TP fill (state TPOIDs=[0, 222], Quantity=residual)
+		// would otherwise be mis-attributed to the already-booked tier — wrong
+		// price on the trade record AND wrong TP{n} label on the DM alert.
+		// Defer those cases to the legacy SL-owner branch in
+		// reconcileHyperliquidPositionsWithResolver.
+		tiers := strategyTPTiers(sc)
+		tpOIDs := tpOIDsForTierCount(statePos.TPOIDs, len(tiers))
+		for _, oid := range tpOIDs {
+			if oid > 0 {
+				return false
+			}
+		}
+		closeQty = statePos.Quantity
+	} else {
+		onChainAbs := math.Abs(onChainPos.Size)
+		sameDirection := (onChainPos.Size > 0 && statePos.Side == "long") ||
+			(onChainPos.Size < 0 && statePos.Side == "short")
+		if !sameDirection {
+			return false
+		}
+		if onChainAbs+1e-9 >= statePos.Quantity {
+			return false
+		}
+		closeQty = statePos.Quantity - onChainAbs
+	}
+	if closeQty <= 1e-9 {
+		return false
+	}
+
+	lookup, useFillFee := resolveFee(sym, 0, closeQty)
+	logHyperliquidReconcileFillLookup(logger, sym, 0, closeQty, lookup, useFillFee)
+
+	tierIdx, hasCleared := hyperliquidClearedTPTier(sc, statePos, closeQty)
+	if !hasCleared {
+		// Cycle-ordering recovery (#672): protection-sync hasn't yet zeroed
+		// pos.TPOIDs[i] for the freshly-filled tier. Cross-check the userFills
+		// lookup — if the matched fill's OID equals one of the configured
+		// TPOIDs, we know which tier fired without waiting for protection-sync.
+		// Restricted to the partial path: full-close attribution still requires
+		// all-tiers-cleared per finding #1.
+		if onChainPos == nil || !useFillFee || lookup.OID <= 0 {
+			return false
+		}
+		tiers := strategyTPTiers(sc)
+		if len(tiers) == 0 {
+			return false
+		}
+		tpOIDs := tpOIDsForTierCount(statePos.TPOIDs, len(tiers))
+		matched := -1
+		for i, oid := range tpOIDs {
+			if oid > 0 && oid == lookup.OID {
+				matched = i
+				break
+			}
+		}
+		if matched < 0 {
+			return false
+		}
+		tierIdx = matched
+		// Leave pos.TPOIDs[matched] positive — protection-sync's Python
+		// pipeline re-detects the fill via userFills and zeros it through
+		// applyHyperliquidProtectionSync later this cycle (idempotent), which
+		// also feeds the plan-builder's "skip already-filled tiers" logic.
+	}
+
+	tpPrices := tieredTPATRPrices(sc, statePos.Side, statePos.AvgCost, statePos.EntryATR)
+	tpPrice := 0.0
+	if tierIdx >= 0 && tierIdx < len(tpPrices) {
+		tpPrice = tpPrices[tierIdx]
+	}
+
+	closePx := tpPrice
+	if useFillFee && lookup.Px > 0 {
+		closePx = lookup.Px
+	}
+	if closePx <= 0 {
+		return false
+	}
+
+	exchangeOrderID := ""
+	if useFillFee && lookup.OID > 0 {
+		exchangeOrderID = strconv.FormatInt(lookup.OID, 10)
+	}
+
+	alertSide := statePos.Side
+	if !recordPerpsExternalPartialCloseWithFillFee(
+		stratState, sym, closeQty, closePx, lookup.Fee, useFillFee,
+		exchangeOrderID, "hl_sync_external_partial", logger,
+	) {
+		return false
+	}
+
+	remaining := 0.0
+	if posAfter := stratState.Positions[sym]; posAfter != nil {
+		remaining = posAfter.Quantity
+	}
+	if pendingAlerts != nil {
+		// lastBookedTradePnL relies on the just-completed RecordTrade inside
+		// the booker; do not insert another RecordTrade between here and the
+		// booker call.
+		*pendingAlerts = append(*pendingAlerts, ProtectionFillAlert{
+			StrategyID:   sc.ID,
+			Symbol:       sym,
+			Side:         alertSide,
+			FillType:     tpTierLabel(tierIdx),
+			IsPartial:    remaining > 1e-9,
+			FillPrice:    closePx,
+			CloseQty:     closeQty,
+			RemainingQty: remaining,
+			RealizedPnL:  lastBookedTradePnL(stratState),
+			HasPnL:       true,
+		})
+	}
+	return true
+}
+
 // reconcileHyperliquidPositionsWithResolver is the resolver-aware variant. The
 // resolver is expected to do pure in-memory cache reads when called under
 // mu.Lock() (see buildCachedHyperliquidReconcileFillResolver) — never make
@@ -463,7 +681,7 @@ func reconcileHyperliquidAccountPositions(dueStrategies, allStrategies []Strateg
 			fmt.Printf("[ERROR] hl-sync: logger for %s: %v\n", sc.ID, err)
 			continue
 		}
-		if reconcileHyperliquidPositionsWithResolver(ss, sym, positions, resolveFee, logger) {
+		if reconcileHyperliquidPositionsForStrategy(sc, ss, sym, positions, resolveFee, logger, &pendingAlerts) {
 			changed = true
 		}
 	}
