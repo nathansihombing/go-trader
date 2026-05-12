@@ -803,6 +803,151 @@ def test_backtester_sl_after_defers_when_sl_unarmed():
     assert hwm == 0.0
 
 
+def test_backtester_sl_after_no_same_bar_fire_after_bump_long():
+    """Regression for #715: when a TP tier fills on bar N and `sl_after` bumps
+    the SL trigger, the end-of-bar SL hit check on bar N must NOT fire — the
+    new SL OID lands mid-cycle in live (after the TP fill), so collapsing both
+    events into one bar would over-trigger.
+
+    Setup (long, ATR=10, entry @ $100):
+      Bar 1 (01-02): open long @ $100, close $100
+      Bar 2 (01-03): close $110 → TP1 tier detected (queues 50% close for bar 3)
+      Bar 3 (01-04): open $110 → TP1 partial fills, SL bumps to $100 (breakeven),
+                     close $99 → WITHOUT the fix, SL hit check fires same bar
+      Bar 4 (01-05): close $99 → SL hit check fires (queues full close for bar 5)
+      Bar 5 (01-06): open $99 → full close fills here
+
+    With the fix, the SL close fills on 2024-01-06. Without it, the suppressed
+    same-bar SL fire on bar 3 would queue the full close one bar earlier
+    (exit_date 2024-01-05).
+    """
+    df = _df_open_then_hold(
+        opens=[100, 100, 100, 110, 99, 99],
+        closes=[100, 100, 110, 99, 99, 99],
+        atrs=[10, 10, 10, 10, 10, 10],
+    )
+    bt = Backtester(
+        initial_capital=1000, commission_pct=0, slippage_pct=0,
+        platform="hyperliquid", strategy_type="perps",
+        stop_loss_atr_mult=1.0,
+        close_strategies=[{
+            "name": "tiered_tp_atr",
+            "params": {
+                "sl_after": "breakeven",
+                "tiers": [
+                    {"atr_multiple": 1.0, "close_fraction": 0.5},
+                    {"atr_multiple": 2.0, "close_fraction": 1.0},
+                ],
+            },
+        }],
+    )
+    result = bt.run(df, save=False)
+
+    # Two trades expected: TP1 partial @ $110 on bar 3, SL full @ $99 on bar 5.
+    sides_prices = [(t["side"], t["exit_price"]) for t in result["trades"]]
+    assert ("long", 110.0) in sides_prices, sides_prices
+    assert ("long", 99.0) in sides_prices, sides_prices
+
+    # The SL close must NOT exit on bar 4 (same-bar fire after bump). It must
+    # exit on bar 5 (one full bar later, after the flag clears and the next
+    # bar's end-of-bar check fires).
+    sl_closes = [t for t in result["trades"] if t["exit_price"] == 99.0]
+    assert len(sl_closes) == 1, sl_closes
+    assert sl_closes[0]["exit_date"] == "2024-01-06 00:00:00", sl_closes[0]
+
+
+def test_backtester_sl_after_no_same_bar_fire_after_bump_short():
+    """Short-side mirror of the #715 regression. The gate is side-agnostic;
+    this locks in the symmetry against future refactors.
+
+    Setup (short, ATR=10, entry @ $100):
+      Bar 1 (01-02): open short @ $100
+      Bar 2 (01-03): close $90  → TP1 detected (price dropped 1×ATR)
+      Bar 3 (01-04): open $90   → TP1 partial fills, SL bumps to $100,
+                                  close $101 → WITHOUT the fix, SL fires
+                                  same bar (short: mark ≥ trigger)
+      Bar 4 (01-05): close $101 → SL hit check fires, queues full close
+      Bar 5 (01-06): open $101  → full close fills here
+    """
+    df = _df_open_then_hold(
+        opens=[100, 100, 100, 90, 101, 101],
+        closes=[100, 100, 90, 101, 101, 101],
+        atrs=[10, 10, 10, 10, 10, 10],
+        open_actions=["short"] + ["none"] * 5,
+    )
+    bt = Backtester(
+        initial_capital=1000, commission_pct=0, slippage_pct=0,
+        platform="hyperliquid", strategy_type="perps",
+        stop_loss_atr_mult=1.0,
+        close_strategies=[{
+            "name": "tiered_tp_atr",
+            "params": {
+                "sl_after": "breakeven",
+                "tiers": [
+                    {"atr_multiple": 1.0, "close_fraction": 0.5},
+                    {"atr_multiple": 2.0, "close_fraction": 1.0},
+                ],
+            },
+        }],
+    )
+    result = bt.run(df, save=False)
+    sides_prices = [(t["side"], t["exit_price"]) for t in result["trades"]]
+    assert ("short", 90.0) in sides_prices, sides_prices
+    assert ("short", 101.0) in sides_prices, sides_prices
+    sl_closes = [t for t in result["trades"] if t["exit_price"] == 101.0]
+    assert len(sl_closes) == 1, sl_closes
+    # Without the fix, the same-bar fire on bar 3 would queue the close at
+    # bar 4 open (exit_date 2024-01-05). With the fix, the next bar's hit
+    # check fires and the close fills on bar 5 open (2024-01-06).
+    assert sl_closes[0]["exit_date"] == "2024-01-06 00:00:00", sl_closes[0]
+
+
+def test_backtester_sl_after_flag_clears_for_next_bar_long():
+    """Companion to #715: the suppression flag must reset on the bar AFTER
+    the bump. If the bump bar's close is above the new trigger (no same-bar
+    fire) and the NEXT bar's close drops below the trigger, the SL must fire
+    on that next bar — not be silently skipped.
+
+    Setup (long, ATR=10, entry @ $100):
+      Bar 1 (01-02): open long @ $100
+      Bar 2 (01-03): close $110 → TP1 detected
+      Bar 3 (01-04): open $110 → TP1 partial fills, SL bumps to $100, close
+                     $105 → suppression flag set but SL not hit anyway
+      Bar 4 (01-05): close $95 → SL hit check runs (flag cleared), queues
+                     full close for bar 5
+      Bar 5 (01-06): open $95 → full close fills here
+    """
+    df = _df_open_then_hold(
+        opens=[100, 100, 100, 110, 105, 95],
+        closes=[100, 100, 110, 105, 95, 95],
+        atrs=[10, 10, 10, 10, 10, 10],
+    )
+    bt = Backtester(
+        initial_capital=1000, commission_pct=0, slippage_pct=0,
+        platform="hyperliquid", strategy_type="perps",
+        stop_loss_atr_mult=1.0,
+        close_strategies=[{
+            "name": "tiered_tp_atr",
+            "params": {
+                "sl_after": "breakeven",
+                "tiers": [
+                    {"atr_multiple": 1.0, "close_fraction": 0.5},
+                    {"atr_multiple": 2.0, "close_fraction": 1.0},
+                ],
+            },
+        }],
+    )
+    result = bt.run(df, save=False)
+    sides_prices = [(t["side"], t["exit_price"]) for t in result["trades"]]
+    assert ("long", 110.0) in sides_prices, sides_prices
+    assert ("long", 95.0) in sides_prices, sides_prices
+    sl_closes = [t for t in result["trades"] if t["exit_price"] == 95.0]
+    assert len(sl_closes) == 1, sl_closes
+    # SL queued at bar 4 close, fills at bar 5 open — confirming the flag
+    # cleared after bar 3 (the bump bar).
+    assert sl_closes[0]["exit_date"] == "2024-01-06 00:00:00", sl_closes[0]
+
+
 def test_backtester_sl_after_does_not_seed_when_no_tier_thresholds():
     """#716 item 3 regression: a degenerate sl_after config where
     `parse_tp_tier_close_fractions` returns [] (e.g., all tiers have
