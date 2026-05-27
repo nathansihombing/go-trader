@@ -40,6 +40,11 @@ For scripted deployments, use `--json`:
 ./go-trader init --json '{"assets":["BTC"],"enableSpot":true,"spotStrategies":["sma_crossover"],"spotCapital":1000,"spotDrawdown":10}' --output config.json
 ```
 
+
+### Pre-flight safety checklist
+
+Before deploying real capital, follow [START_SAFE.md](START_SAFE.md) for a staged paper→live rollout, risk-rail verification, and operational safety checks.
+
 ### Manual Setup
 
 ```bash
