@@ -181,7 +181,11 @@ var defaultFuturesStrategies = []stratDef{
 }
 
 // Supported CME futures symbols for the init wizard.
-var supportedFuturesSymbols = []string{"ES", "NQ", "MES", "MNQ", "CL", "GC"}
+var supportedFuturesSymbols = []string{
+	"ES", "NQ", "MES", "MNQ", // equity index futures
+	"CL", "GC", // commodities
+	"6E", "6J", "6B", "6C", "6A", // major FX futures (EUR, JPY, GBP, CAD, AUD)
+}
 
 // Supported stock symbols for Robinhood options.
 var supportedStockSymbols = []string{"SPY", "QQQ", "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "META"}
@@ -253,6 +257,102 @@ func discoverStrategies() {
 	}
 }
 
+const (
+	marketProfileCrypto = "crypto"
+	marketProfileStocks = "stocks"
+	marketProfileFX     = "fx"
+	marketProfileMixed  = "mixed"
+)
+
+func normalizeMarketProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case marketProfileStocks, "stock", "equities", "equity":
+		return marketProfileStocks
+	case marketProfileFX, "forex", "currency", "currencies":
+		return marketProfileFX
+	case marketProfileMixed, "all":
+		return marketProfileMixed
+	case "", marketProfileCrypto:
+		return marketProfileCrypto
+	default:
+		return marketProfileCrypto
+	}
+}
+
+func defaultStrategyTypesForMarketProfile(profile string) []string {
+	switch normalizeMarketProfile(profile) {
+	case marketProfileStocks:
+		return []string{"options"}
+	case marketProfileFX:
+		return []string{"futures"}
+	case marketProfileMixed:
+		return []string{"spot", "options", "futures"}
+	default:
+		return []string{"spot"}
+	}
+}
+
+func defaultOptionPlatformsForMarketProfile(profile string) []string {
+	if normalizeMarketProfile(profile) == marketProfileStocks {
+		return []string{"robinhood"}
+	}
+	return []string{"deribit"}
+}
+
+func defaultFuturesSymbolsForMarketProfile(profile string) []string {
+	if normalizeMarketProfile(profile) == marketProfileFX {
+		return []string{"6E", "6J"}
+	}
+	return []string{"ES", "MES"}
+}
+
+func initOptionsNeedsCryptoAssets(opts InitOptions) bool {
+	if opts.EnableSpot || opts.EnablePerps || opts.EnableLuno || opts.EnableOKX || opts.EnableRobinhood {
+		return true
+	}
+	if opts.EnableOptions {
+		for _, plt := range opts.OptionPlatforms {
+			if plt != "robinhood" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func applyMarketProfileDefaults(opts *InitOptions) {
+	if opts == nil {
+		return
+	}
+	profile := normalizeMarketProfile(opts.MarketProfile)
+	if profile == marketProfileCrypto && strings.TrimSpace(opts.MarketProfile) == "" {
+		return
+	}
+	if !hasAnyEnabledStrategyType(*opts) {
+		switch profile {
+		case marketProfileStocks:
+			opts.EnableOptions = true
+		case marketProfileFX:
+			opts.EnableFutures = true
+		case marketProfileMixed:
+			opts.EnableSpot = true
+			opts.EnableOptions = true
+			opts.EnableFutures = true
+		default:
+			opts.EnableSpot = true
+		}
+	}
+	if opts.EnableOptions && len(opts.OptionPlatforms) == 0 {
+		opts.OptionPlatforms = defaultOptionPlatformsForMarketProfile(profile)
+	}
+	if opts.EnableOptions && len(opts.OptStrategies) == 0 {
+		opts.OptStrategies = []string{"vol_mean_reversion"}
+	}
+	if opts.EnableFutures && len(opts.FuturesSymbols) == 0 {
+		opts.FuturesSymbols = defaultFuturesSymbolsForMarketProfile(profile)
+	}
+}
+
 func hasAnyEnabledStrategyType(opts InitOptions) bool {
 	return opts.EnableSpot || opts.EnableOptions || opts.EnablePerps || opts.EnableFutures || opts.EnableRobinhood || opts.EnableLuno || opts.EnableOKX || opts.EnableManual
 }
@@ -303,6 +403,7 @@ func selectionDefaults(options []string, preferred []string, fallbackFirst bool)
 // InitOptions captures all user choices from the interactive wizard.
 type InitOptions struct {
 	OutputPath              string
+	MarketProfile           string   `json:"marketProfile,omitempty"` // "crypto", "stocks", "fx", or "mixed"
 	Assets                  []string // selected asset names, e.g. ["BTC", "ETH"]
 	EnableSpot              bool
 	EnableOptions           bool
@@ -754,10 +855,11 @@ func runInitFromJSON(jsonStr string, outputPath string) int {
 		}
 	}
 
+	applyMarketProfileDefaults(&opts)
 	applyMinimalStarterDefaults(&opts)
 
-	if len(opts.Assets) == 0 {
-		fmt.Fprintln(os.Stderr, "Error: at least one asset required")
+	if initOptionsNeedsCryptoAssets(opts) && len(opts.Assets) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: at least one crypto asset required for selected strategy types/platforms")
 		return 1
 	}
 	if !hasAnyEnabledStrategyType(opts) {
@@ -940,24 +1042,15 @@ func runInit(args []string) int {
 		}
 	}
 
-	// Step 2: Asset selection.
-	assetNames := make([]string, len(supportedAssets))
-	for i, a := range supportedAssets {
-		assetNames[i] = a.Name
-	}
-	assetIdxs := p.MultiSelectWithDefaults("\nSelect assets to trade:", assetNames, selectionDefaults(assetNames, []string{starterAssetName}, true))
-	if len(assetIdxs) == 0 {
-		fmt.Println("No assets selected. Aborted.")
-		return 1
-	}
-	selectedAssets := make([]string, len(assetIdxs))
-	for i, idx := range assetIdxs {
-		selectedAssets[i] = supportedAssets[idx].Name
-	}
+	// Step 2: Market profile.
+	marketProfileLabels := []string{"crypto", "stocks", "fx", "mixed"}
+	marketProfileIdx := p.Choice("\nMarket profile:", marketProfileLabels, 0)
+	marketProfile := marketProfileLabels[marketProfileIdx]
 
 	// Step 3: Strategy types.
 	stratTypeNames := []string{"spot", "options", "perps", "futures", "robinhood", "luno", "okx"}
-	stratTypeIdxs := p.MultiSelectWithDefaults("\nSelect strategy types:", stratTypeNames, selectionDefaults(stratTypeNames, []string{"spot"}, true))
+	stratTypeDefaults := selectionDefaults(stratTypeNames, defaultStrategyTypesForMarketProfile(marketProfile), true)
+	stratTypeIdxs := p.MultiSelectWithDefaults("\nSelect strategy types:", stratTypeNames, stratTypeDefaults)
 	enableSpot, enableOptions, enablePerps, enableFutures, enableRobinhood, enableLuno, enableOKX := false, false, false, false, false, false, false
 	for _, idx := range stratTypeIdxs {
 		switch stratTypeNames[idx] {
@@ -982,11 +1075,39 @@ func runInit(args []string) int {
 		return 1
 	}
 
-	// Step 4: Options platform.
+	// Step 4: Asset selection (only when needed by crypto spot/perps/options/luno/okx).
+	selectedAssets := []string{}
+	needsCryptoAssets := enableSpot || enablePerps || enableLuno || enableOKX
+	assetNames := make([]string, len(supportedAssets))
+	for i, a := range supportedAssets {
+		assetNames[i] = a.Name
+	}
+
+	if needsCryptoAssets {
+		assetIdxs := p.MultiSelectWithDefaults("\nSelect crypto assets to trade:", assetNames, selectionDefaults(assetNames, []string{starterAssetName}, true))
+		if len(assetIdxs) == 0 {
+			fmt.Println("No assets selected. Aborted.")
+			return 1
+		}
+		selectedAssets = make([]string, len(assetIdxs))
+		for i, idx := range assetIdxs {
+			selectedAssets[i] = supportedAssets[idx].Name
+		}
+	} else {
+		fmt.Println("\nNo crypto strategy type selected — skipping crypto asset selection.")
+	}
+
+	// Step 5: Options platform.
 	var optionPlatforms []string
 	if enableOptions {
 		platOptions := []string{"deribit", "ibkr", "robinhood", "okx", "all"}
-		platIdx := p.Choice("\nOptions platform:", platOptions, 0)
+		defaultPlatforms := defaultOptionPlatformsForMarketProfile(marketProfile)
+		defaultOptionIdxs := selectionDefaults(platOptions, defaultPlatforms, true)
+		defaultOptionIdx := 0
+		if len(defaultOptionIdxs) > 0 {
+			defaultOptionIdx = defaultOptionIdxs[0]
+		}
+		platIdx := p.Choice("\nOptions platform:", platOptions, defaultOptionIdx)
 		switch platOptions[platIdx] {
 		case "deribit":
 			optionPlatforms = []string{"deribit"}
@@ -1000,8 +1121,26 @@ func runInit(args []string) int {
 			optionPlatforms = []string{"deribit", "ibkr", "robinhood", "okx"}
 		}
 	}
+	optionsNeedCryptoAssets := false
+	for _, plt := range optionPlatforms {
+		if plt != "robinhood" {
+			optionsNeedCryptoAssets = true
+			break
+		}
+	}
+	if optionsNeedCryptoAssets && len(selectedAssets) == 0 {
+		assetIdxs := p.MultiSelectWithDefaults("\nSelect crypto assets to trade:", assetNames, selectionDefaults(assetNames, []string{starterAssetName}, true))
+		if len(assetIdxs) == 0 {
+			fmt.Println("No assets selected. Aborted.")
+			return 1
+		}
+		selectedAssets = make([]string, len(assetIdxs))
+		for i, idx := range assetIdxs {
+			selectedAssets[i] = supportedAssets[idx].Name
+		}
+	}
 
-	// Step 4b: Robinhood options stock symbols.
+	// Step 5b: Robinhood options stock symbols.
 	var robinhoodOptionsSymbols []string
 	for _, plt := range optionPlatforms {
 		if plt == "robinhood" {
@@ -1016,7 +1155,7 @@ func runInit(args []string) int {
 		}
 	}
 
-	// Step 5: Perps mode.
+	// Step 6: Perps mode.
 	perpsMode := "paper"
 	if enablePerps {
 		modeOptions := []string{"paper (safe default)", "live (requires HYPERLIQUID_SECRET_KEY)"}
@@ -1025,7 +1164,7 @@ func runInit(args []string) int {
 		}
 	}
 
-	// Step 5b: Futures mode and symbols.
+	// Step 6b: Futures mode and symbols.
 	futuresMode := "paper"
 	var futuresSymbols []string
 	if enableFutures {
@@ -1033,16 +1172,17 @@ func runInit(args []string) int {
 		if p.Choice("\nFutures trading mode:", modeOptions, 0) == 1 {
 			futuresMode = "live"
 		}
-		symbolIdxs := p.MultiSelect("\nSelect futures symbols:", supportedFuturesSymbols, false)
+		futuresDefaultIdxs := selectionDefaults(supportedFuturesSymbols, defaultFuturesSymbolsForMarketProfile(marketProfile), false)
+		symbolIdxs := p.MultiSelectWithDefaults("\nSelect futures symbols:", supportedFuturesSymbols, futuresDefaultIdxs)
 		for _, idx := range symbolIdxs {
 			futuresSymbols = append(futuresSymbols, supportedFuturesSymbols[idx])
 		}
 		if len(futuresSymbols) == 0 {
-			futuresSymbols = []string{"ES", "MES"} // defaults
+			futuresSymbols = defaultFuturesSymbolsForMarketProfile(marketProfile)
 		}
 	}
 
-	// Step 5c: Robinhood mode.
+	// Step 6c: Robinhood mode.
 	robinhoodMode := "paper"
 	if enableRobinhood {
 		modeOptions := []string{"paper (safe default — signal only, no orders)", "live (requires ROBINHOOD_USERNAME/PASSWORD/TOTP_SECRET)"}
@@ -1051,7 +1191,7 @@ func runInit(args []string) int {
 		}
 	}
 
-	// Step 5d: OKX mode.
+	// Step 6d: OKX mode.
 	okxMode := "paper"
 	if enableOKX {
 		modeOptions := []string{"paper (safe default)", "live (requires OKX_API_KEY/API_SECRET/PASSPHRASE)"}
@@ -1319,6 +1459,7 @@ func runInit(args []string) int {
 
 	opts := InitOptions{
 		OutputPath:                outputPath,
+		MarketProfile:             marketProfile,
 		Assets:                    selectedAssets,
 		EnableSpot:                enableSpot,
 		EnableOptions:             enableOptions,
