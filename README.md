@@ -113,7 +113,7 @@ Strategies are auto-discovered from `shared_strategies/` at `go-trader init` tim
 | Deribit | Options | BTC, ETH | — | Live quotes |
 | IBKR/CME | Options | BTC, ETH | IBKR creds | Black-Scholes |
 | Hyperliquid | Perps | any HL-listed | `HYPERLIQUID_SECRET_KEY` | SDK public |
-| TopStep | Futures | ES, NQ, MES, MNQ, CL, GC | `TOPSTEP_API_KEY` / `_SECRET` / `_ACCOUNT_ID` | yfinance |
+| TopStep | Futures | ES, NQ, MES, MNQ, CL, GC, 6E, 6J, 6B, 6C, 6A | `TOPSTEP_API_KEY` / `_SECRET` / `_ACCOUNT_ID` | yfinance |
 | Robinhood | Crypto | BTC, ETH, SOL, DOGE, … | `ROBINHOOD_USERNAME` / `_PASSWORD` / `_TOTP_SECRET` | yfinance |
 | Robinhood | Stock options | SPY, QQQ, AAPL, … | (same as above) | Black-Scholes |
 | OKX | Spot + Perps + Options | BTC, ETH, SOL | `OKX_API_KEY` / `_SECRET` / `_PASSPHRASE` (`OKX_SANDBOX=1` for demo) | CCXT public |

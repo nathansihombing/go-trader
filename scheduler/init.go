@@ -181,7 +181,11 @@ var defaultFuturesStrategies = []stratDef{
 }
 
 // Supported CME futures symbols for the init wizard.
-var supportedFuturesSymbols = []string{"ES", "NQ", "MES", "MNQ", "CL", "GC"}
+var supportedFuturesSymbols = []string{
+	"ES", "NQ", "MES", "MNQ", // equity index futures
+	"CL", "GC", // commodities
+	"6E", "6J", "6B", "6C", "6A", // major FX futures (EUR, JPY, GBP, CAD, AUD)
+}
 
 // Supported stock symbols for Robinhood options.
 var supportedStockSymbols = []string{"SPY", "QQQ", "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "META"}
@@ -940,22 +944,7 @@ func runInit(args []string) int {
 		}
 	}
 
-	// Step 2: Asset selection.
-	assetNames := make([]string, len(supportedAssets))
-	for i, a := range supportedAssets {
-		assetNames[i] = a.Name
-	}
-	assetIdxs := p.MultiSelectWithDefaults("\nSelect assets to trade:", assetNames, selectionDefaults(assetNames, []string{starterAssetName}, true))
-	if len(assetIdxs) == 0 {
-		fmt.Println("No assets selected. Aborted.")
-		return 1
-	}
-	selectedAssets := make([]string, len(assetIdxs))
-	for i, idx := range assetIdxs {
-		selectedAssets[i] = supportedAssets[idx].Name
-	}
-
-	// Step 3: Strategy types.
+	// Step 2: Strategy types.
 	stratTypeNames := []string{"spot", "options", "perps", "futures", "robinhood", "luno", "okx"}
 	stratTypeIdxs := p.MultiSelectWithDefaults("\nSelect strategy types:", stratTypeNames, selectionDefaults(stratTypeNames, []string{"spot"}, true))
 	enableSpot, enableOptions, enablePerps, enableFutures, enableRobinhood, enableLuno, enableOKX := false, false, false, false, false, false, false
@@ -982,6 +971,28 @@ func runInit(args []string) int {
 		return 1
 	}
 
+	// Step 3: Asset selection (only when needed by crypto spot/perps/options/luno/okx).
+	selectedAssets := []string{}
+	needsCryptoAssets := enableSpot || enablePerps || enableLuno || enableOKX
+	assetNames := make([]string, len(supportedAssets))
+	for i, a := range supportedAssets {
+		assetNames[i] = a.Name
+	}
+
+	if needsCryptoAssets {
+		assetIdxs := p.MultiSelectWithDefaults("\nSelect crypto assets to trade:", assetNames, selectionDefaults(assetNames, []string{starterAssetName}, true))
+		if len(assetIdxs) == 0 {
+			fmt.Println("No assets selected. Aborted.")
+			return 1
+		}
+		selectedAssets = make([]string, len(assetIdxs))
+		for i, idx := range assetIdxs {
+			selectedAssets[i] = supportedAssets[idx].Name
+		}
+	} else {
+		fmt.Println("\nNo crypto strategy type selected — skipping crypto asset selection.")
+	}
+
 	// Step 4: Options platform.
 	var optionPlatforms []string
 	if enableOptions {
@@ -998,6 +1009,24 @@ func runInit(args []string) int {
 			optionPlatforms = []string{"okx"}
 		case "all":
 			optionPlatforms = []string{"deribit", "ibkr", "robinhood", "okx"}
+		}
+	}
+	optionsNeedCryptoAssets := false
+	for _, plt := range optionPlatforms {
+		if plt != "robinhood" {
+			optionsNeedCryptoAssets = true
+			break
+		}
+	}
+	if optionsNeedCryptoAssets && len(selectedAssets) == 0 {
+		assetIdxs := p.MultiSelectWithDefaults("\nSelect crypto assets to trade:", assetNames, selectionDefaults(assetNames, []string{starterAssetName}, true))
+		if len(assetIdxs) == 0 {
+			fmt.Println("No assets selected. Aborted.")
+			return 1
+		}
+		selectedAssets = make([]string, len(assetIdxs))
+		for i, idx := range assetIdxs {
+			selectedAssets[i] = supportedAssets[idx].Name
 		}
 	}
 
