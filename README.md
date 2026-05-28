@@ -32,13 +32,28 @@ After building the binary, run the config wizard:
 ./go-trader init
 ```
 
-It walks asset/strategy/platform/capital/risk/Discord choices and writes `scheduler/config.json`. Defaults to a minimal BTC spot starter; risk prompts (warn threshold, portfolio kill-switch) appear only when live trading is selected.
+It starts with a market profile (`crypto`, `stocks`, `fx`, or `mixed`), then walks the relevant strategy/platform/capital/risk/Discord choices and writes `scheduler/config.json`. Crypto asset selection is skipped for stock-only and FX-futures-only setups; the `fx` profile defaults futures symbols to `6E`/`6J`, while the `stocks` profile defaults options to Robinhood stock options. Risk prompts (warn threshold, portfolio kill-switch) appear only when live trading is selected.
 
-For scripted deployments, use `--json`:
+For scripted deployments, use `--json`, or the lighter `--profile` shortcut for market-focused starter configs:
 
 ```bash
 ./go-trader init --json '{"assets":["BTC"],"enableSpot":true,"spotStrategies":["sma_crossover"],"spotCapital":1000,"spotDrawdown":10}' --output config.json
+./go-trader init --profile stocks --stock-symbols AAPL,MSFT --output stocks.json
+./go-trader init --profile fx --futures-symbols 6E,6J --output fx.json
 ```
+
+
+### Pre-flight safety checklist
+
+Before deploying real capital, follow [START_SAFE.md](START_SAFE.md) for a staged paper→live rollout, risk-rail verification, and operational safety checks.
+
+You can also run a built-in config audit before go-live:
+
+```bash
+./go-trader --config scheduler/config.json --preflight
+```
+
+It exits non-zero on critical findings and prints warnings for risky-but-allowed setups.
 
 ### Manual Setup
 
@@ -100,7 +115,7 @@ Strategies are auto-discovered from `shared_strategies/` at `go-trader init` tim
 | Deribit | Options | BTC, ETH | — | Live quotes |
 | IBKR/CME | Options | BTC, ETH | IBKR creds | Black-Scholes |
 | Hyperliquid | Perps | any HL-listed | `HYPERLIQUID_SECRET_KEY` | SDK public |
-| TopStep | Futures | ES, NQ, MES, MNQ, CL, GC | `TOPSTEP_API_KEY` / `_SECRET` / `_ACCOUNT_ID` | yfinance |
+| TopStep | Futures | ES, NQ, MES, MNQ, CL, GC, 6E, 6J, 6B, 6C, 6A | `TOPSTEP_API_KEY` / `_SECRET` / `_ACCOUNT_ID` | yfinance |
 | Robinhood | Crypto | BTC, ETH, SOL, DOGE, … | `ROBINHOOD_USERNAME` / `_PASSWORD` / `_TOTP_SECRET` | yfinance |
 | Robinhood | Stock options | SPY, QQQ, AAPL, … | (same as above) | Black-Scholes |
 | OKX | Spot + Perps + Options | BTC, ETH, SOL | `OKX_API_KEY` / `_SECRET` / `_PASSPHRASE` (`OKX_SANDBOX=1` for demo) | CCXT public |

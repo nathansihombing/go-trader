@@ -75,6 +75,7 @@ func main() {
 	summary := flag.String("summary", "", "Post snapshot summary for the specified channel (e.g., hyperliquid, spot, options) and exit")
 	leaderboard := flag.Bool("leaderboard", false, "Post pre-computed daily leaderboard and exit")
 	statusPortFlag := flag.Int("status-port", 0, fmt.Sprintf("HTTP status server port (overrides config, default: %d)", DefaultStatusPort))
+	preflight := flag.Bool("preflight", false, "Run safety preflight checks against config and exit")
 	flag.Parse()
 
 	if err := validateDaemonInvocation(flag.Args()); err != nil {
@@ -89,6 +90,23 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Loaded config: %d strategies, interval=%ds\n", len(cfg.Strategies), cfg.IntervalSeconds)
+	if *preflight {
+		issues := BuildPreflightAudit(cfg)
+		bad := false
+		for _, it := range issues {
+			fmt.Printf("[preflight] %s: %s\n", strings.ToUpper(it.Severity), it.Message)
+			if it.Severity == "error" {
+				bad = true
+			}
+		}
+		if len(issues) == 0 {
+			fmt.Println("[preflight] OK: no safety findings")
+		}
+		if bad {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
 
 	// #704: emit a one-line resolved summary per strategy so operators can
 	// audit close/SL/TP wiring without grepping the JSON. Best-effort — a
