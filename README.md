@@ -45,6 +45,14 @@ For scripted deployments, use `--json`:
 
 Before deploying real capital, follow [START_SAFE.md](START_SAFE.md) for a staged paper→live rollout, risk-rail verification, and operational safety checks.
 
+You can also run a built-in config audit before go-live:
+
+```bash
+./go-trader --config scheduler/config.json --preflight
+```
+
+It exits non-zero on critical findings and prints warnings for risky-but-allowed setups.
+
 ### Manual Setup
 
 ```bash
