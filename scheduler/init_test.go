@@ -1612,3 +1612,65 @@ func TestRunInitFromJSON_WriteError(t *testing.T) {
 		t.Errorf("expected exit code 1 when writing to a directory, got %d", code)
 	}
 }
+
+func TestRunInitFromJSON_FXMarketProfileSkipsCryptoAssets(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "config.json")
+	code := runInitFromJSON(`{"marketProfile":"fx"}`, out)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(cfg.Strategies) == 0 {
+		t.Fatal("expected futures strategies for fx profile")
+	}
+	symbols := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Type != "futures" {
+			t.Fatalf("expected only futures strategies for fx profile, got %s (%s)", sc.Type, sc.ID)
+		}
+		if len(sc.Args) >= 2 {
+			symbols[sc.Args[1]] = true
+		}
+	}
+	if !symbols["6E"] || !symbols["6J"] {
+		t.Fatalf("expected FX futures defaults 6E and 6J, got %#v", symbols)
+	}
+}
+
+func TestRunInitFromJSON_StocksMarketProfileDefaultsRobinhoodOptions(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "config.json")
+	code := runInitFromJSON(`{"marketProfile":"stocks"}`, out)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(cfg.Strategies) != 2 {
+		t.Fatalf("expected default SPY/QQQ Robinhood options strategies, got %d", len(cfg.Strategies))
+	}
+	ids := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Type != "options" || sc.Platform != "robinhood" {
+			t.Fatalf("expected robinhood options strategy, got type=%s platform=%s id=%s", sc.Type, sc.Platform, sc.ID)
+		}
+		ids[sc.ID] = true
+	}
+	if !ids["rh-vol-spy"] || !ids["rh-vol-qqq"] {
+		t.Fatalf("expected rh-vol-spy/rh-vol-qqq, got %#v", ids)
+	}
+}
