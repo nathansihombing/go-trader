@@ -421,7 +421,7 @@ func selectionDefaults(options []string, preferred []string, fallbackFirst bool)
 // InitOptions captures all user choices from the interactive wizard.
 type InitOptions struct {
 	OutputPath              string
-	MarketProfile           string   `json:"marketProfile,omitempty"` // "crypto", "stocks", "fx", or "mixed"
+	MarketProfile           string   `json:"marketProfile,omitempty"` // "crypto", "stocks", "currency"/"fx", or "mixed"
 	Assets                  []string // selected asset names, e.g. ["BTC", "ETH"]
 	EnableSpot              bool
 	EnableOptions           bool
@@ -1034,11 +1034,13 @@ func runInit(args []string) int {
 	jsonFlag := fs.String("json", "", "JSON blob of InitOptions for non-interactive config generation")
 	outputFlag := fs.String("output", "scheduler/config.json", "output config file path")
 	profileFlag := ""
-	fs.StringVar(&profileFlag, "profile", "", "Non-interactive market profile: crypto, stocks, fx, or mixed")
+	fs.StringVar(&profileFlag, "profile", "", "Non-interactive market profile: crypto, stocks, currency/fx, or mixed")
 	fs.StringVar(&profileFlag, "market-profile", "", "Alias for --profile")
 	assetsFlag := fs.String("assets", "", "Comma-separated crypto assets for --profile (for example BTC,ETH)")
 	stockSymbolsFlag := fs.String("stock-symbols", "", "Comma-separated stock symbols for --profile stocks (for example SPY,QQQ,AAPL)")
-	futuresSymbolsFlag := fs.String("futures-symbols", "", "Comma-separated futures/FX symbols for --profile fx or mixed (for example 6E,6J,ES)")
+	futuresSymbolsFlag := ""
+	fs.StringVar(&futuresSymbolsFlag, "futures-symbols", "", "Comma-separated futures/FX symbols for --profile currency/fx or mixed (for example 6E,6J,ES)")
+	fs.StringVar(&futuresSymbolsFlag, "currency-symbols", "", "Alias for --futures-symbols")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
 		return 1
@@ -1053,7 +1055,7 @@ func runInit(args []string) int {
 			MarketProfile:           profileFlag,
 			Assets:                  splitCSVArg(*assetsFlag),
 			RobinhoodOptionsSymbols: splitCSVArg(*stockSymbolsFlag),
-			FuturesSymbols:          splitCSVArg(*futuresSymbolsFlag),
+			FuturesSymbols:          splitCSVArg(futuresSymbolsFlag),
 		}
 		payload, err := json.Marshal(opts)
 		if err != nil {
@@ -1082,7 +1084,7 @@ func runInit(args []string) int {
 	}
 
 	// Step 2: Market profile.
-	marketProfileLabels := []string{"crypto", "stocks", "fx", "mixed"}
+	marketProfileLabels := []string{"crypto", "stocks", "currency", "mixed"}
 	marketProfileIdx := p.Choice("\nMarket profile:", marketProfileLabels, 0)
 	marketProfile := marketProfileLabels[marketProfileIdx]
 

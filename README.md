@@ -32,14 +32,14 @@ After building the binary, run the config wizard:
 ./go-trader init
 ```
 
-It starts with a market profile (`crypto`, `stocks`, `fx`, or `mixed`), then walks the relevant strategy/platform/capital/risk/Discord choices and writes `scheduler/config.json`. Crypto asset selection is skipped for stock-only and FX-futures-only setups; the `fx` profile defaults futures symbols to `6E`/`6J`, while the `stocks` profile defaults options to Robinhood stock options. Risk prompts (warn threshold, portfolio kill-switch) appear only when live trading is selected.
+It starts with a market profile (`crypto`, `stocks`, `currency`/`fx`, or `mixed`), then walks the relevant strategy/platform/capital/risk/Discord choices and writes `scheduler/config.json`. Crypto asset selection is skipped for stock-only and currency/FX-futures-only setups; the `currency`/`fx` profile defaults futures symbols to `6E`/`6J`, while the `stocks` profile defaults options to Robinhood stock options. Risk prompts (warn threshold, portfolio kill-switch) appear only when live trading is selected.
 
 For scripted deployments, use `--json`, or the lighter `--profile` shortcut for market-focused starter configs:
 
 ```bash
 ./go-trader init --json '{"assets":["BTC"],"enableSpot":true,"spotStrategies":["sma_crossover"],"spotCapital":1000,"spotDrawdown":10}' --output config.json
 ./go-trader init --profile stocks --stock-symbols AAPL,MSFT --output stocks.json
-./go-trader init --profile fx --futures-symbols 6E,6J --output fx.json
+./go-trader init --profile currency --currency-symbols 6E,6J --output currency.json
 ```
 
 

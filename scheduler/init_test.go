@@ -1733,3 +1733,32 @@ func TestRunInitProfileFlagFXCustomSymbols(t *testing.T) {
 		t.Fatalf("expected custom 6B/6C futures symbols only, got %#v", symbols)
 	}
 }
+
+func TestRunInitProfileFlagCurrencyAliasCustomSymbols(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "currency.json")
+	code := runInit([]string{"--profile", "currency", "--currency-symbols", "6A,6C", "--output", out})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	symbols := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Type != "futures" {
+			t.Fatalf("expected currency profile to emit futures only, got type=%s id=%s", sc.Type, sc.ID)
+		}
+		if len(sc.Args) >= 2 {
+			symbols[sc.Args[1]] = true
+		}
+	}
+	if !symbols["6A"] || !symbols["6C"] || symbols["6E"] || symbols["6J"] {
+		t.Fatalf("expected custom 6A/6C currency futures symbols only, got %#v", symbols)
+	}
+}
