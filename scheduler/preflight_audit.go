@@ -11,6 +11,23 @@ type PreflightIssue struct {
 	Message  string
 }
 
+const (
+	preflightExitOK    = 0
+	preflightExitError = 2
+)
+
+// PreflightExitCode returns the process exit code for audit findings. In
+// strict mode warnings are treated as failures so CI/deploy scripts can enforce
+// a fully clean preflight before going live.
+func PreflightExitCode(issues []PreflightIssue, strict bool) int {
+	for _, it := range issues {
+		if it.Severity == "error" || (strict && it.Severity == "warn") {
+			return preflightExitError
+		}
+	}
+	return preflightExitOK
+}
+
 // BuildPreflightAudit reports common operator misconfigurations before live use.
 // It intentionally focuses on high-signal checks and does not replace full
 // config validation done by LoadConfig.

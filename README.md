@@ -51,9 +51,10 @@ You can also run a built-in config audit before go-live:
 
 ```bash
 ./go-trader --config scheduler/config.json --preflight
+./go-trader --config scheduler/config.json --preflight-strict   # CI/deploy gate: warnings fail too
 ```
 
-It exits non-zero on critical findings and prints warnings for risky-but-allowed setups.
+`--preflight` exits non-zero on critical findings and prints warnings for risky-but-allowed setups; `--preflight-strict` also exits non-zero on warnings so scripts can require a completely clean audit.
 
 ### Manual Setup
 

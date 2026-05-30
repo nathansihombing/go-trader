@@ -76,6 +76,7 @@ func main() {
 	leaderboard := flag.Bool("leaderboard", false, "Post pre-computed daily leaderboard and exit")
 	statusPortFlag := flag.Int("status-port", 0, fmt.Sprintf("HTTP status server port (overrides config, default: %d)", DefaultStatusPort))
 	preflight := flag.Bool("preflight", false, "Run safety preflight checks against config and exit")
+	preflightStrict := flag.Bool("preflight-strict", false, "Run preflight and fail on warnings as well as errors")
 	flag.Parse()
 
 	if err := validateDaemonInvocation(flag.Args()); err != nil {
@@ -90,22 +91,15 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Loaded config: %d strategies, interval=%ds\n", len(cfg.Strategies), cfg.IntervalSeconds)
-	if *preflight {
+	if *preflight || *preflightStrict {
 		issues := BuildPreflightAudit(cfg)
-		bad := false
 		for _, it := range issues {
 			fmt.Printf("[preflight] %s: %s\n", strings.ToUpper(it.Severity), it.Message)
-			if it.Severity == "error" {
-				bad = true
-			}
 		}
 		if len(issues) == 0 {
 			fmt.Println("[preflight] OK: no safety findings")
 		}
-		if bad {
-			os.Exit(2)
-		}
-		os.Exit(0)
+		os.Exit(PreflightExitCode(issues, *preflightStrict))
 	}
 
 	// #704: emit a one-line resolved summary per strategy so operators can

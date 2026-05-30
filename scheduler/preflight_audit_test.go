@@ -66,3 +66,29 @@ func TestBuildPreflightAuditAcceptsPerpsWithStop(t *testing.T) {
 		t.Fatalf("expected no preflight issues, got %#v", issues)
 	}
 }
+
+func TestPreflightExitCodeStrictModeFailsWarnings(t *testing.T) {
+	issues := []PreflightIssue{{Severity: "warn", Message: "warning only"}}
+	if got := PreflightExitCode(issues, false); got != preflightExitOK {
+		t.Fatalf("non-strict warning exit = %d, want %d", got, preflightExitOK)
+	}
+	if got := PreflightExitCode(issues, true); got != preflightExitError {
+		t.Fatalf("strict warning exit = %d, want %d", got, preflightExitError)
+	}
+}
+
+func TestPreflightExitCodeErrorsAlwaysFail(t *testing.T) {
+	issues := []PreflightIssue{{Severity: "error", Message: "bad"}}
+	if got := PreflightExitCode(issues, false); got != preflightExitError {
+		t.Fatalf("non-strict error exit = %d, want %d", got, preflightExitError)
+	}
+	if got := PreflightExitCode(issues, true); got != preflightExitError {
+		t.Fatalf("strict error exit = %d, want %d", got, preflightExitError)
+	}
+}
+
+func TestPreflightExitCodeCleanPasses(t *testing.T) {
+	if got := PreflightExitCode(nil, true); got != preflightExitOK {
+		t.Fatalf("clean strict exit = %d, want %d", got, preflightExitOK)
+	}
+}
