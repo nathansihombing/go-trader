@@ -1762,3 +1762,27 @@ func TestRunInitProfileFlagCurrencyAliasCustomSymbols(t *testing.T) {
 		t.Fatalf("expected custom 6A/6C currency futures symbols only, got %#v", symbols)
 	}
 }
+
+func TestRunInitFromJSONRejectsUnknownMarketProfile(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "bad.json")
+	code := runInitFromJSON(`{"marketProfile":"bonds"}`, out)
+	if code != 1 {
+		t.Fatalf("expected exit 1 for unknown profile, got %d", code)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Fatalf("unexpected output file for unknown profile: %s", out)
+	}
+}
+
+func TestRunInitProfileFlagRejectsUnknownMarketProfile(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "bad.json")
+	code := runInit([]string{"--profile", "bonds", "--output", out})
+	if code != 1 {
+		t.Fatalf("expected exit 1 for unknown profile flag, got %d", code)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Fatalf("unexpected output file for unknown profile flag: %s", out)
+	}
+}

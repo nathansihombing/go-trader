@@ -279,6 +279,19 @@ func normalizeMarketProfile(profile string) string {
 	}
 }
 
+func isKnownMarketProfile(profile string) bool {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", marketProfileCrypto, marketProfileStocks, "stock", "equities", "equity", marketProfileFX, "forex", "currency", "currencies", marketProfileMixed, "all":
+		return true
+	default:
+		return false
+	}
+}
+
+func marketProfileUsage() string {
+	return "crypto, stocks (aliases: stock/equities/equity), currency (aliases: fx/forex/currencies), or mixed"
+}
+
 func defaultStrategyTypesForMarketProfile(profile string) []string {
 	switch normalizeMarketProfile(profile) {
 	case marketProfileStocks:
@@ -873,6 +886,11 @@ func runInitFromJSON(jsonStr string, outputPath string) int {
 		}
 	}
 
+	if !isKnownMarketProfile(opts.MarketProfile) {
+		fmt.Fprintf(os.Stderr, "Error: unknown marketProfile %q (expected %s)\n", opts.MarketProfile, marketProfileUsage())
+		return 1
+	}
+
 	applyMarketProfileDefaults(&opts)
 	applyMinimalStarterDefaults(&opts)
 
@@ -1034,7 +1052,7 @@ func runInit(args []string) int {
 	jsonFlag := fs.String("json", "", "JSON blob of InitOptions for non-interactive config generation")
 	outputFlag := fs.String("output", "scheduler/config.json", "output config file path")
 	profileFlag := ""
-	fs.StringVar(&profileFlag, "profile", "", "Non-interactive market profile: crypto, stocks, currency/fx, or mixed")
+	fs.StringVar(&profileFlag, "profile", "", "Non-interactive market profile: "+marketProfileUsage())
 	fs.StringVar(&profileFlag, "market-profile", "", "Alias for --profile")
 	assetsFlag := fs.String("assets", "", "Comma-separated crypto assets for --profile (for example BTC,ETH)")
 	stockSymbolsFlag := fs.String("stock-symbols", "", "Comma-separated stock symbols for --profile stocks (for example SPY,QQQ,AAPL)")
