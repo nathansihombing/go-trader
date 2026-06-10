@@ -132,3 +132,66 @@ func TestPreflightStatusPrefersErrors(t *testing.T) {
 		t.Fatalf("status = %q, want error", got)
 	}
 }
+
+func TestBuildPreflightAuditFlagsMissingTopStepLiveEnv(t *testing.T) {
+	t.Setenv("TOPSTEP_API_KEY", "")
+	t.Setenv("TOPSTEP_API_SECRET", "")
+	t.Setenv("TOPSTEP_ACCOUNT_ID", "")
+	cfg := &Config{
+		PortfolioRisk: &PortfolioRiskConfig{MaxDrawdownPct: 25, WarnThresholdPct: 60},
+		Strategies: []StrategyConfig{{
+			ID:             "ts-live",
+			Type:           "futures",
+			Platform:       "topstep",
+			Args:           []string{"momentum", "6E", "1h", "--mode=live"},
+			MaxDrawdownPct: 5,
+		}},
+	}
+
+	issues := BuildPreflightAudit(cfg)
+	if !hasPreflightIssue(issues, "error", "TOPSTEP_API_KEY") || !hasPreflightIssue(issues, "error", "TOPSTEP_API_SECRET") || !hasPreflightIssue(issues, "error", "TOPSTEP_ACCOUNT_ID") {
+		t.Fatalf("missing TopStep env error: %#v", issues)
+	}
+}
+
+func TestBuildPreflightAuditAcceptsTopStepLiveEnv(t *testing.T) {
+	t.Setenv("TOPSTEP_API_KEY", "key")
+	t.Setenv("TOPSTEP_API_SECRET", "secret")
+	t.Setenv("TOPSTEP_ACCOUNT_ID", "account")
+	cfg := &Config{
+		PortfolioRisk: &PortfolioRiskConfig{MaxDrawdownPct: 25, WarnThresholdPct: 60},
+		Strategies: []StrategyConfig{{
+			ID:             "ts-live",
+			Type:           "futures",
+			Platform:       "topstep",
+			Args:           []string{"momentum", "6E", "1h", "--mode", "live"},
+			MaxDrawdownPct: 5,
+		}},
+	}
+
+	issues := BuildPreflightAudit(cfg)
+	if len(issues) != 0 {
+		t.Fatalf("expected no preflight issues with TopStep env set, got %#v", issues)
+	}
+}
+
+func TestBuildPreflightAuditFlagsMissingOKXPassphrase(t *testing.T) {
+	t.Setenv("OKX_API_KEY", "key")
+	t.Setenv("OKX_API_SECRET", "secret")
+	t.Setenv("OKX_PASSPHRASE", "")
+	cfg := &Config{
+		PortfolioRisk: &PortfolioRiskConfig{MaxDrawdownPct: 25, WarnThresholdPct: 60},
+		Strategies: []StrategyConfig{{
+			ID:             "okx-live",
+			Type:           "spot",
+			Platform:       "okx",
+			Args:           []string{"momentum", "BTC", "1h", "--mode=live"},
+			MaxDrawdownPct: 5,
+		}},
+	}
+
+	issues := BuildPreflightAudit(cfg)
+	if !hasPreflightIssue(issues, "error", "OKX_PASSPHRASE") {
+		t.Fatalf("missing OKX passphrase error: %#v", issues)
+	}
+}

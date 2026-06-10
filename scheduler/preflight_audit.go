@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -63,6 +64,52 @@ func BuildPreflightReport(issues []PreflightIssue, strict bool) PreflightReport 
 	}
 }
 
+func argsMode(args []string) string {
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "--mode=") {
+			return strings.TrimSpace(strings.TrimPrefix(arg, "--mode="))
+		}
+		if arg == "--mode" && i+1 < len(args) {
+			return strings.TrimSpace(args[i+1])
+		}
+	}
+	return ""
+}
+
+func strategyIsLive(sc StrategyConfig) bool {
+	if sc.Type == "manual" {
+		return true
+	}
+	return strings.EqualFold(argsMode(sc.Args), "live")
+}
+
+func missingEnvVars(names ...string) []string {
+	missing := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func liveCredentialEnvVars(sc StrategyConfig) []string {
+	if !strategyIsLive(sc) {
+		return nil
+	}
+	switch sc.Platform {
+	case "hyperliquid":
+		return []string{"HYPERLIQUID_SECRET_KEY"}
+	case "topstep":
+		return []string{"TOPSTEP_API_KEY", "TOPSTEP_API_SECRET", "TOPSTEP_ACCOUNT_ID"}
+	case "robinhood":
+		return []string{"ROBINHOOD_USERNAME", "ROBINHOOD_PASSWORD", "ROBINHOOD_TOTP_SECRET"}
+	case "okx":
+		return []string{"OKX_API_KEY", "OKX_API_SECRET", "OKX_PASSPHRASE"}
+	}
+	return nil
+}
+
 // BuildPreflightAudit reports common operator misconfigurations before live use.
 // It intentionally focuses on high-signal checks and does not replace full
 // config validation done by LoadConfig.
@@ -90,6 +137,11 @@ func BuildPreflightAudit(cfg *Config) []PreflightIssue {
 		}
 		if sc.MaxDrawdownPct <= 0 {
 			issues = append(issues, PreflightIssue{Severity: "error", Message: fmt.Sprintf("strategy[%s].max_drawdown_pct must be > 0", id)})
+		}
+		if envVars := liveCredentialEnvVars(sc); len(envVars) > 0 {
+			if missing := missingEnvVars(envVars...); len(missing) > 0 {
+				issues = append(issues, PreflightIssue{Severity: "error", Message: fmt.Sprintf("strategy[%s] live %s requires missing env vars: %s", id, sc.Platform, strings.Join(missing, ", "))})
+			}
 		}
 		if sc.Type == "perps" || sc.Type == "manual" {
 			hasSL := (sc.StopLossPct != nil && *sc.StopLossPct > 0) ||
