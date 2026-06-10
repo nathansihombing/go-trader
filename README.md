@@ -52,9 +52,10 @@ You can also run a built-in config audit before go-live:
 ```bash
 ./go-trader --config scheduler/config.json --preflight
 ./go-trader --config scheduler/config.json --preflight-strict   # CI/deploy gate: warnings fail too
+./go-trader --config scheduler/config.json --preflight-json     # machine-readable report
 ```
 
-`--preflight` exits non-zero on critical findings and prints warnings for risky-but-allowed setups; `--preflight-strict` also exits non-zero on warnings so scripts can require a completely clean audit.
+`--preflight` exits non-zero on critical findings and prints warnings for risky-but-allowed setups; `--preflight-strict` also exits non-zero on warnings so scripts can require a completely clean audit. Use `--preflight-json` when CI or deployment tooling needs a stable JSON report (`status`, `strict`, `exit_code`, and `issues`).
 
 ### Manual Setup
 

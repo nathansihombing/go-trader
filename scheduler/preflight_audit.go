@@ -7,8 +7,16 @@ import (
 
 // PreflightIssue is a startup-readiness finding surfaced by --preflight.
 type PreflightIssue struct {
-	Severity string // "error" or "warn"
-	Message  string
+	Severity string `json:"severity"` // "error" or "warn"
+	Message  string `json:"message"`
+}
+
+// PreflightReport is the machine-readable summary emitted by --preflight-json.
+type PreflightReport struct {
+	Status   string           `json:"status"`
+	Strict   bool             `json:"strict"`
+	ExitCode int              `json:"exit_code"`
+	Issues   []PreflightIssue `json:"issues"`
 }
 
 const (
@@ -26,6 +34,33 @@ func PreflightExitCode(issues []PreflightIssue, strict bool) int {
 		}
 	}
 	return preflightExitOK
+}
+
+func PreflightStatus(issues []PreflightIssue) string {
+	status := "ok"
+	for _, it := range issues {
+		switch it.Severity {
+		case "error":
+			return "error"
+		case "warn":
+			if status == "ok" {
+				status = "warn"
+			}
+		}
+	}
+	return status
+}
+
+func BuildPreflightReport(issues []PreflightIssue, strict bool) PreflightReport {
+	if issues == nil {
+		issues = []PreflightIssue{}
+	}
+	return PreflightReport{
+		Status:   PreflightStatus(issues),
+		Strict:   strict,
+		ExitCode: PreflightExitCode(issues, strict),
+		Issues:   issues,
+	}
 }
 
 // BuildPreflightAudit reports common operator misconfigurations before live use.

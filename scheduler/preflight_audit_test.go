@@ -92,3 +92,43 @@ func TestPreflightExitCodeCleanPasses(t *testing.T) {
 		t.Fatalf("clean strict exit = %d, want %d", got, preflightExitOK)
 	}
 }
+
+func TestBuildPreflightReportStatusAndJSONShape(t *testing.T) {
+	issues := []PreflightIssue{{Severity: "warn", Message: "warning only"}}
+	report := BuildPreflightReport(issues, true)
+	if report.Status != "warn" {
+		t.Fatalf("status = %q, want warn", report.Status)
+	}
+	if !report.Strict {
+		t.Fatal("expected strict report")
+	}
+	if report.ExitCode != preflightExitError {
+		t.Fatalf("exit code = %d, want %d", report.ExitCode, preflightExitError)
+	}
+	if len(report.Issues) != 1 || report.Issues[0].Severity != "warn" || report.Issues[0].Message == "" {
+		t.Fatalf("unexpected issues in report: %#v", report.Issues)
+	}
+}
+
+func TestBuildPreflightReportCleanUsesEmptyIssueSlice(t *testing.T) {
+	report := BuildPreflightReport(nil, false)
+	if report.Status != "ok" {
+		t.Fatalf("status = %q, want ok", report.Status)
+	}
+	if report.ExitCode != preflightExitOK {
+		t.Fatalf("exit code = %d, want %d", report.ExitCode, preflightExitOK)
+	}
+	if report.Issues == nil || len(report.Issues) != 0 {
+		t.Fatalf("expected non-nil empty issue slice, got %#v", report.Issues)
+	}
+}
+
+func TestPreflightStatusPrefersErrors(t *testing.T) {
+	issues := []PreflightIssue{
+		{Severity: "warn", Message: "warning"},
+		{Severity: "error", Message: "error"},
+	}
+	if got := PreflightStatus(issues); got != "error" {
+		t.Fatalf("status = %q, want error", got)
+	}
+}
