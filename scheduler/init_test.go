@@ -1612,3 +1612,177 @@ func TestRunInitFromJSON_WriteError(t *testing.T) {
 		t.Errorf("expected exit code 1 when writing to a directory, got %d", code)
 	}
 }
+
+func TestRunInitFromJSON_FXMarketProfileSkipsCryptoAssets(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "config.json")
+	code := runInitFromJSON(`{"marketProfile":"fx"}`, out)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(cfg.Strategies) == 0 {
+		t.Fatal("expected futures strategies for fx profile")
+	}
+	symbols := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Type != "futures" {
+			t.Fatalf("expected only futures strategies for fx profile, got %s (%s)", sc.Type, sc.ID)
+		}
+		if len(sc.Args) >= 2 {
+			symbols[sc.Args[1]] = true
+		}
+	}
+	if !symbols["6E"] || !symbols["6J"] {
+		t.Fatalf("expected FX futures defaults 6E and 6J, got %#v", symbols)
+	}
+}
+
+func TestRunInitFromJSON_StocksMarketProfileDefaultsRobinhoodOptions(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "config.json")
+	code := runInitFromJSON(`{"marketProfile":"stocks"}`, out)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(cfg.Strategies) != 2 {
+		t.Fatalf("expected default SPY/QQQ Robinhood options strategies, got %d", len(cfg.Strategies))
+	}
+	if cfg.Strategies[0].Capital != 5000 || cfg.Strategies[0].MaxDrawdownPct != 10 {
+		t.Fatalf("expected stock profile options capital/drawdown defaults, got capital=%g drawdown=%g", cfg.Strategies[0].Capital, cfg.Strategies[0].MaxDrawdownPct)
+	}
+	ids := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Type != "options" || sc.Platform != "robinhood" {
+			t.Fatalf("expected robinhood options strategy, got type=%s platform=%s id=%s", sc.Type, sc.Platform, sc.ID)
+		}
+		ids[sc.ID] = true
+	}
+	if !ids["rh-vol-spy"] || !ids["rh-vol-qqq"] {
+		t.Fatalf("expected rh-vol-spy/rh-vol-qqq, got %#v", ids)
+	}
+}
+
+func TestRunInitProfileFlagStocksCustomSymbols(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "stocks.json")
+	code := runInit([]string{"--profile", "stocks", "--stock-symbols", "AAPL,MSFT", "--output", out})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Platform != "robinhood" || sc.Type != "options" {
+			t.Fatalf("expected stock profile to emit Robinhood options only, got type=%s platform=%s id=%s", sc.Type, sc.Platform, sc.ID)
+		}
+		ids[sc.ID] = true
+	}
+	if !ids["rh-vol-aapl"] || !ids["rh-vol-msft"] {
+		t.Fatalf("expected custom AAPL/MSFT stock options strategies, got %#v", ids)
+	}
+}
+
+func TestRunInitProfileFlagFXCustomSymbols(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "fx.json")
+	code := runInit([]string{"--profile", "fx", "--futures-symbols", "6B,6C", "--output", out})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	symbols := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Type != "futures" {
+			t.Fatalf("expected FX profile to emit futures only, got type=%s id=%s", sc.Type, sc.ID)
+		}
+		if len(sc.Args) >= 2 {
+			symbols[sc.Args[1]] = true
+		}
+	}
+	if !symbols["6B"] || !symbols["6C"] || symbols["6E"] || symbols["6J"] {
+		t.Fatalf("expected custom 6B/6C futures symbols only, got %#v", symbols)
+	}
+}
+
+func TestRunInitProfileFlagCurrencyAliasCustomSymbols(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "currency.json")
+	code := runInit([]string{"--profile", "currency", "--currency-symbols", "6A,6C", "--output", out})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	symbols := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Type != "futures" {
+			t.Fatalf("expected currency profile to emit futures only, got type=%s id=%s", sc.Type, sc.ID)
+		}
+		if len(sc.Args) >= 2 {
+			symbols[sc.Args[1]] = true
+		}
+	}
+	if !symbols["6A"] || !symbols["6C"] || symbols["6E"] || symbols["6J"] {
+		t.Fatalf("expected custom 6A/6C currency futures symbols only, got %#v", symbols)
+	}
+}
+
+func TestRunInitFromJSONRejectsUnknownMarketProfile(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "bad.json")
+	code := runInitFromJSON(`{"marketProfile":"bonds"}`, out)
+	if code != 1 {
+		t.Fatalf("expected exit 1 for unknown profile, got %d", code)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Fatalf("unexpected output file for unknown profile: %s", out)
+	}
+}
+
+func TestRunInitProfileFlagRejectsUnknownMarketProfile(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "bad.json")
+	code := runInit([]string{"--profile", "bonds", "--output", out})
+	if code != 1 {
+		t.Fatalf("expected exit 1 for unknown profile flag, got %d", code)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Fatalf("unexpected output file for unknown profile flag: %s", out)
+	}
+}

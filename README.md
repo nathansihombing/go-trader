@@ -24,6 +24,10 @@ install https://github.com/richkuo/go-trader and init.
 
 Give your AI agent [SKILL.md](SKILL.md) (raw: `https://raw.githubusercontent.com/richkuo/go-trader/main/SKILL.md`) — it clones the repo, installs deps, walks through configuration, builds the binary, and starts the service. For non-Claude agents see [AGENTS.md](AGENTS.md). Using [OpenClaw](https://openclaw.ai) or [Hermes](https://hermes-agent.nousresearch.com/)? Just say "Set up go-trader".
 
+### Fast paper-mode quickstart
+
+If you just want to get a stock, currency/FX, or crypto paper-mode starter running, follow [QUICKSTART.md](QUICKSTART.md). It includes exact build, profile init, preflight, one-cycle smoke test, and status-server commands.
+
 ### Interactive Setup (go-trader init)
 
 After building the binary, run the config wizard:
@@ -32,13 +36,30 @@ After building the binary, run the config wizard:
 ./go-trader init
 ```
 
-It walks asset/strategy/platform/capital/risk/Discord choices and writes `scheduler/config.json`. Defaults to a minimal BTC spot starter; risk prompts (warn threshold, portfolio kill-switch) appear only when live trading is selected.
+It starts with a market profile (`crypto`, `stocks`, `currency`/`fx`, or `mixed`), then walks the relevant strategy/platform/capital/risk/Discord choices and writes `scheduler/config.json`. Crypto asset selection is skipped for stock-only and currency/FX-futures-only setups; the `currency`/`fx` profile defaults futures symbols to `6E`/`6J`, while the `stocks` profile defaults options to Robinhood stock options. Profile aliases are accepted (`equities`/`equity` for stocks, `forex`/`currencies` for currency), but unknown profiles are rejected instead of silently falling back to crypto. Risk prompts (warn threshold, portfolio kill-switch) appear only when live trading is selected.
 
-For scripted deployments, use `--json`:
+For scripted deployments, use `--json`, or the lighter `--profile` shortcut for market-focused starter configs:
 
 ```bash
 ./go-trader init --json '{"assets":["BTC"],"enableSpot":true,"spotStrategies":["sma_crossover"],"spotCapital":1000,"spotDrawdown":10}' --output config.json
+./go-trader init --profile stocks --stock-symbols AAPL,MSFT --output stocks.json
+./go-trader init --profile currency --currency-symbols 6E,6J --output currency.json
 ```
+
+
+### Pre-flight safety checklist
+
+Before deploying real capital, follow [START_SAFE.md](START_SAFE.md) for a staged paper→live rollout, risk-rail verification, and operational safety checks.
+
+You can also run a built-in config audit before go-live:
+
+```bash
+./go-trader --config scheduler/config.json --preflight
+./go-trader --config scheduler/config.json --preflight-strict   # CI/deploy gate: warnings fail too
+./go-trader --config scheduler/config.json --preflight-json     # machine-readable report
+```
+
+`--preflight` exits non-zero on critical findings and prints warnings for risky-but-allowed setups; `--preflight-strict` also exits non-zero on warnings so scripts can require a completely clean audit. Use `--preflight-json` when CI or deployment tooling needs a stable JSON report (`status`, `strict`, `exit_code`, and `issues`).
 
 ### Manual Setup
 
@@ -100,7 +121,7 @@ Strategies are auto-discovered from `shared_strategies/` at `go-trader init` tim
 | Deribit | Options | BTC, ETH | — | Live quotes |
 | IBKR/CME | Options | BTC, ETH | IBKR creds | Black-Scholes |
 | Hyperliquid | Perps | any HL-listed | `HYPERLIQUID_SECRET_KEY` | SDK public |
-| TopStep | Futures | ES, NQ, MES, MNQ, CL, GC | `TOPSTEP_API_KEY` / `_SECRET` / `_ACCOUNT_ID` | yfinance |
+| TopStep | Futures | ES, NQ, MES, MNQ, CL, GC, 6E, 6J, 6B, 6C, 6A | `TOPSTEP_API_KEY` / `_SECRET` / `_ACCOUNT_ID` | yfinance |
 | Robinhood | Crypto | BTC, ETH, SOL, DOGE, … | `ROBINHOOD_USERNAME` / `_PASSWORD` / `_TOTP_SECRET` | yfinance |
 | Robinhood | Stock options | SPY, QQQ, AAPL, … | (same as above) | Black-Scholes |
 | OKX | Spot + Perps + Options | BTC, ETH, SOL | `OKX_API_KEY` / `_SECRET` / `_PASSPHRASE` (`OKX_SANDBOX=1` for demo) | CCXT public |
