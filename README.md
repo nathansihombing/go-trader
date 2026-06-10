@@ -24,6 +24,10 @@ install https://github.com/richkuo/go-trader and init.
 
 Give your AI agent [SKILL.md](SKILL.md) (raw: `https://raw.githubusercontent.com/richkuo/go-trader/main/SKILL.md`) — it clones the repo, installs deps, walks through configuration, builds the binary, and starts the service. For non-Claude agents see [AGENTS.md](AGENTS.md). Using [OpenClaw](https://openclaw.ai) or [Hermes](https://hermes-agent.nousresearch.com/)? Just say "Set up go-trader".
 
+### Fast paper-mode quickstart
+
+If you just want to get a stock, currency/FX, or crypto paper-mode starter running, follow [QUICKSTART.md](QUICKSTART.md). It includes exact build, profile init, preflight, one-cycle smoke test, and status-server commands.
+
 ### Interactive Setup (go-trader init)
 
 After building the binary, run the config wizard:
