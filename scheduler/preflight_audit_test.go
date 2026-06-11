@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -193,5 +194,57 @@ func TestBuildPreflightAuditFlagsMissingOKXPassphrase(t *testing.T) {
 	issues := BuildPreflightAudit(cfg)
 	if !hasPreflightIssue(issues, "error", "OKX_PASSPHRASE") {
 		t.Fatalf("missing OKX passphrase error: %#v", issues)
+	}
+}
+
+func TestBuildPreflightAuditFlagsMissingRuntimeFiles(t *testing.T) {
+	t.Chdir(t.TempDir())
+	cfg := &Config{
+		PortfolioRisk: &PortfolioRiskConfig{MaxDrawdownPct: 25, WarnThresholdPct: 60},
+		Strategies: []StrategyConfig{{
+			ID:             "missing-script",
+			Type:           "spot",
+			Script:         "shared_scripts/missing.py",
+			MaxDrawdownPct: 5,
+		}},
+	}
+
+	issues := BuildPreflightAudit(cfg)
+	if !hasPreflightIssue(issues, "error", "script not found") {
+		t.Fatalf("missing script error: %#v", issues)
+	}
+	if !hasPreflightIssue(issues, "error", ".venv/bin/python3") {
+		t.Fatalf("missing python venv error: %#v", issues)
+	}
+}
+
+func TestBuildPreflightAuditAcceptsRuntimeFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll("shared_scripts", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(".venv/bin", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("shared_scripts/check_strategy.py", []byte("print('{}')\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(".venv/bin/python3", []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{
+		PortfolioRisk: &PortfolioRiskConfig{MaxDrawdownPct: 25, WarnThresholdPct: 60},
+		Strategies: []StrategyConfig{{
+			ID:             "ok-script",
+			Type:           "spot",
+			Script:         "shared_scripts/check_strategy.py",
+			MaxDrawdownPct: 5,
+		}},
+	}
+
+	issues := BuildPreflightAudit(cfg)
+	if len(issues) != 0 {
+		t.Fatalf("expected no runtime file issues, got %#v", issues)
 	}
 }

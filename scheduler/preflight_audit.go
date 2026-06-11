@@ -110,6 +110,33 @@ func liveCredentialEnvVars(sc StrategyConfig) []string {
 	return nil
 }
 
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func appendRuntimeFileIssues(issues []PreflightIssue, cfg *Config) []PreflightIssue {
+	needsPython := false
+	for _, sc := range cfg.Strategies {
+		script := strings.TrimSpace(sc.Script)
+		if script == "" {
+			continue
+		}
+		needsPython = true
+		id := strings.TrimSpace(sc.ID)
+		if id == "" {
+			id = "<unknown>"
+		}
+		if !pathExists(script) {
+			issues = append(issues, PreflightIssue{Severity: "error", Message: fmt.Sprintf("strategy[%s] script not found: %s", id, script)})
+		}
+	}
+	if needsPython && !pathExists(".venv/bin/python3") {
+		issues = append(issues, PreflightIssue{Severity: "error", Message: ".venv/bin/python3 not found; run `uv sync` before starting go-trader"})
+	}
+	return issues
+}
+
 // BuildPreflightAudit reports common operator misconfigurations before live use.
 // It intentionally focuses on high-signal checks and does not replace full
 // config validation done by LoadConfig.
@@ -118,6 +145,8 @@ func BuildPreflightAudit(cfg *Config) []PreflightIssue {
 		return []PreflightIssue{{Severity: "error", Message: "nil config"}}
 	}
 	issues := make([]PreflightIssue, 0)
+
+	issues = appendRuntimeFileIssues(issues, cfg)
 
 	if cfg.PortfolioRisk == nil {
 		issues = append(issues, PreflightIssue{Severity: "warn", Message: "portfolio_risk is not set; consider max_drawdown_pct and max_notional_usd rails"})

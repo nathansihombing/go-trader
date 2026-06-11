@@ -41,7 +41,7 @@ Use a strict rollout plan:
 
 - Keep status server loopback-only (default) and access remotely through VPN/reverse proxy.
 - Enable owner notifications in Discord/Telegram.
-- Run `./go-trader --config scheduler/config.json --preflight-strict` and resolve missing live credential environment variables before switching any strategy to live.
+- Run `uv sync`, then `./go-trader --config scheduler/config.json --preflight-strict`, and resolve missing scripts, missing `.venv/bin/python3`, and missing live credential environment variables before switching any strategy to live.
 - Keep backups of `scheduler/config.json` and `scheduler/state.db`.
 - Use the update script (`bash scripts/update.sh --restart`) instead of ad-hoc rebuilds.
 
