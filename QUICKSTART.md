@@ -14,7 +14,7 @@ bash scripts/quickstart-profile.sh crypto BTC,ETH
 START=1 bash scripts/quickstart-profile.sh stocks SPY,QQQ
 ```
 
-The helper runs `uv sync` automatically when `.venv/bin/python3` is missing (set `SKIP_UV=1` to skip). Set `RUN_ONCE=1` to also run one scheduler cycle after preflight, `START=1` to launch the bot in the background and poll `/health`, or `STRICT=1` to make warnings fail the preflight gate. Existing configs are backed up automatically unless `FORCE=1`.
+The helper runs `uv sync` automatically when `.venv/bin/python3` is missing (set `SKIP_UV=1` to skip). Set `RUN_ONCE=1` to also run one scheduler cycle after preflight, `START=1` to launch the bot in the background and poll `/health`, or `STRICT=1` to make warnings fail the preflight gate. Existing configs are backed up automatically unless `FORCE=1`. Use `STATUS_PORT=8100` if port `8099` is already in use.
 
 ## 1) Install dependencies and build
 
@@ -84,6 +84,12 @@ Then in another shell:
 ```bash
 curl -s localhost:8099/health
 curl -s localhost:8099/status | python3 -m json.tool
+```
+
+If you used `START=1`, stop the background process with:
+
+```bash
+kill "$(cat ./go-trader.pid)"
 ```
 
 The server binds to loopback only. Keep it that way and use VPN/reverse proxy if you need remote access.

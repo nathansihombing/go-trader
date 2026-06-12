@@ -117,15 +117,15 @@ if [[ "${START:-0}" == "1" ]]; then
   mkdir -p logs
   pidfile="${GO_TRADER_PIDFILE:-./go-trader.pid}"
   log_file="${QUICKSTART_LOG:-logs/quickstart.log}"
+  status_port="${STATUS_PORT:-8099}"
   if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
     echo "go-trader already appears to be running with PID $(cat "$pidfile") ($pidfile)"
   else
-    nohup ./go-trader --config "$output" >"$log_file" 2>&1 &
+    nohup ./go-trader --config "$output" --status-port "$status_port" >"$log_file" 2>&1 &
     echo $! >"$pidfile"
-    echo "Started go-trader PID $(cat "$pidfile") (log: $log_file)"
+    echo "Started go-trader PID $(cat "$pidfile") on status port $status_port (log: $log_file)"
   fi
   if command -v curl >/dev/null 2>&1; then
-    status_port="${STATUS_PORT:-8099}"
     deadline=$((SECONDS + ${HEALTH_TIMEOUT:-30}))
     until curl -fsS "http://127.0.0.1:${status_port}/health" >/dev/null 2>&1; do
       if (( SECONDS >= deadline )); then
@@ -152,6 +152,9 @@ Next commands:
   ./go-trader --config $output
 
 Then inspect:
-  curl -s localhost:8099/health
-  curl -s localhost:8099/status | python3 -m json.tool
+  curl -s localhost:${STATUS_PORT:-8099}/health
+  curl -s localhost:${STATUS_PORT:-8099}/status | python3 -m json.tool
+
+Stop background quickstart process:
+  kill "\$(cat ${GO_TRADER_PIDFILE:-./go-trader.pid})"
 EOF_DONE

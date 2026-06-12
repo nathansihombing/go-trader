@@ -28,6 +28,23 @@ Give your AI agent [SKILL.md](SKILL.md) (raw: `https://raw.githubusercontent.com
 
 If you just want to get a stock, currency/FX, or crypto paper-mode starter running, follow [QUICKSTART.md](QUICKSTART.md). It includes exact build, profile init, preflight, one-cycle smoke test, and status-server commands.
 
+Copy/paste one of these to build, generate a paper config, run preflight, start the bot in the background, and poll `/health`:
+
+```bash
+START=1 bash scripts/quickstart-profile.sh stocks SPY,QQQ
+START=1 bash scripts/quickstart-profile.sh currency 6E,6J
+START=1 bash scripts/quickstart-profile.sh crypto BTC,ETH
+```
+
+Then check it:
+
+```bash
+curl -s localhost:8099/health
+curl -s localhost:8099/status | python3 -m json.tool
+```
+
+Stop the background quickstart process with `kill "$(cat ./go-trader.pid)"`.
+
 ### Interactive Setup (go-trader init)
 
 After building the binary, run the config wizard:
