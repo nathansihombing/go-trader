@@ -47,6 +47,11 @@ For scripted deployments, use `--json`, or the lighter `--profile` shortcut for 
 ```
 
 
+
+### Operator checklist and follow-up issues
+
+For the full clone → paper → live readiness checklist, see [docs/OPERATOR_CHECKLIST.md](docs/OPERATOR_CHECKLIST.md). Follow-up work is tracked in [docs/github_issues.json](docs/github_issues.json); if you have GitHub CLI installed, run `bash scripts/create-github-issues.sh` to create those issues.
+
 ### Pre-flight safety checklist
 
 Before deploying real capital, follow [START_SAFE.md](START_SAFE.md) for a staged paper→live rollout, risk-rail verification, and operational safety checks.

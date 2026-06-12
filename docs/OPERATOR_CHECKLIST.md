@@ -89,3 +89,18 @@ STRICT=1 bash scripts/quickstart-profile.sh crypto BTC,ETH
 - [ ] Back up `scheduler/config.json` and `scheduler/state.db` before config changes.
 - [ ] Keep one paper canary instance if you also run live.
 - [ ] Re-run `--preflight-strict` after every config or dependency change.
+
+## Phase 7 — GitHub follow-up issues
+
+- [ ] Review the structured backlog in [`docs/github_issues.json`](github_issues.json).
+- [ ] If GitHub CLI is installed/authenticated, create the issues:
+
+  ```bash
+  bash scripts/create-github-issues.sh
+  ```
+
+- [ ] If GitHub CLI is not available, export a Markdown list you can paste manually:
+
+  ```bash
+  bash scripts/create-github-issues.sh --markdown /tmp/go-trader-issues.md --dry-run
+  ```
