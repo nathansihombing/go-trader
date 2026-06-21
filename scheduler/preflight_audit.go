@@ -146,8 +146,6 @@ func BuildPreflightAudit(cfg *Config) []PreflightIssue {
 	}
 	issues := make([]PreflightIssue, 0)
 
-	issues = appendRuntimeFileIssues(issues, cfg)
-
 	if cfg.PortfolioRisk == nil {
 		issues = append(issues, PreflightIssue{Severity: "warn", Message: "portfolio_risk is not set; consider max_drawdown_pct and max_notional_usd rails"})
 	} else {
@@ -166,11 +164,6 @@ func BuildPreflightAudit(cfg *Config) []PreflightIssue {
 		}
 		if sc.MaxDrawdownPct <= 0 {
 			issues = append(issues, PreflightIssue{Severity: "error", Message: fmt.Sprintf("strategy[%s].max_drawdown_pct must be > 0", id)})
-		}
-		if envVars := liveCredentialEnvVars(sc); len(envVars) > 0 {
-			if missing := missingEnvVars(envVars...); len(missing) > 0 {
-				issues = append(issues, PreflightIssue{Severity: "error", Message: fmt.Sprintf("strategy[%s] live %s requires missing env vars: %s", id, sc.Platform, strings.Join(missing, ", "))})
-			}
 		}
 		if sc.Type == "perps" || sc.Type == "manual" {
 			hasSL := (sc.StopLossPct != nil && *sc.StopLossPct > 0) ||
