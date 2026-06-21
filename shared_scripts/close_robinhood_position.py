@@ -2,20 +2,20 @@
 """
 Robinhood emergency position close script (issue #346).
 
-Submits a market sell for the full on-account quantity of a single crypto
-coin via the Robinhood adapter's ``market_sell``. Used by the portfolio
-kill switch in the Go scheduler to liquidate live exposure regardless of
+Submits a market sell for the full on-account quantity of a single crypto coin
+or direct stock/ETF share symbol via the Robinhood adapter's ``market_sell``.
+Used by the portfolio kill switch in the Go scheduler to liquidate live exposure regardless of
 which strategy "owns" the position. Mirrors ``close_hyperliquid_position.py``
 and ``close_okx_position.py`` so the Go caller's parser contract is
 symmetric across platforms.
 
-Scope: crypto only. Robinhood stock options positions have different close
-semantics (sell-to-close vs buy-to-close per leg) and no unified adapter
-method — they are surfaced as a known gap by the Go kill-switch plan
-rather than auto-closed here (see #346 follow-up).
+Scope: crypto and direct stock/ETF shares. Robinhood stock options positions
+have different close semantics (sell-to-close vs buy-to-close per leg) and no
+unified adapter method — they are surfaced as a known gap by the Go kill-switch
+plan rather than auto-closed here (see #346 follow-up).
 
 Usage:
-    close_robinhood_position.py --symbol=BTC --mode=live
+    close_robinhood_position.py --symbol=AAPL --mode=live
 
 Live mode is required (kill switch is meaningful only against real
 positions). Stdout is always a single JSON envelope matching the shape of
@@ -62,10 +62,10 @@ def main():
             _emit_error(args.symbol, "Robinhood adapter not live — set ROBINHOOD_USERNAME / ROBINHOOD_PASSWORD / ROBINHOOD_TOTP_SECRET")
             return
 
-        # Find the on-chain quantity so we can market-sell the full balance.
-        # Robinhood crypto is spot (no reduce-only), so the kill switch is
-        # explicit: sell everything this account holds for this coin.
-        positions = adapter.get_crypto_positions()
+        # Find the on-account quantity so we can market-sell the full balance.
+        # Robinhood direct shares/crypto are spot (no reduce-only), so the kill
+        # switch is explicit: sell everything this account holds for this symbol.
+        positions = adapter.get_crypto_positions_strict() if adapter.is_crypto_symbol(args.symbol) else adapter.get_stock_positions_strict()
         qty = 0.0
         for pos in positions or []:
             if (pos.get("symbol") or "").upper() == args.symbol.upper():

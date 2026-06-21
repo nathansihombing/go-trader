@@ -34,7 +34,7 @@ Pick **one** profile first. These commands generate paper/signal-first configs b
 ./go-trader init --profile stocks --stock-symbols SPY,QQQ --output scheduler/config.json
 ```
 
-This creates Robinhood stock-options strategies. Live trading later requires Robinhood credentials, but paper/signal testing does not.
+This creates direct Robinhood stock-share strategies (`type: spot`, `platform: robinhood`) for SPY/QQQ. Live trading later requires Robinhood credentials, but paper/signal testing does not. If you want stock options instead of shares, use `--profile stock_options`.
 
 ### Currency / FX starter
 

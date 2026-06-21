@@ -5,9 +5,9 @@
     "body": "## Goal\nAdd a CI workflow that builds `go-trader`, generates stock/currency/crypto profile configs, and validates `--preflight-json` output.\n\n## Acceptance criteria\n- Build scheduler binary in CI.\n- Run `go-trader init --profile stocks --stock-symbols SPY --output <tmp>`.\n- Run `go-trader init --profile currency --currency-symbols 6E --output <tmp>`.\n- Run `go-trader init --profile crypto --assets BTC --output <tmp>`.\n- Assert `--preflight-json` emits parseable JSON with `status`, `exit_code`, and `issues`.\n- Keep tests offline or mocked where possible."
   },
   {
-    "title": "Add direct stocks/equities trading profile beyond Robinhood options",
+    "title": "Add more direct stock-share brokers beyond Robinhood",
     "labels": ["enhancement", "stocks"],
-    "body": "## Goal\nThe current `stocks` profile creates Robinhood stock-options strategies. Add a direct equities/stock trading path for users who want stock shares/ETFs instead of options.\n\n## Acceptance criteria\n- Define supported stock symbols and default strategies for direct equity trading.\n- Add init/profile flags for equities if separate from options.\n- Add adapter/script support or document the selected broker/platform.\n- Add paper-mode tests and preflight checks."
+    "body": "## Goal\nThe `stocks` profile now creates direct Robinhood stock-share strategies. Add another broker path (for example IBKR shares) for users who do not want to trade through Robinhood.\n\n## Acceptance criteria\n- Select the next direct-equities broker/platform.\n- Add adapter/script execution support for share orders.\n- Add init/profile defaults and credential preflight checks.\n- Keep the Robinhood direct-share profile working."
   },
   {
     "title": "Add currency/FX live trading path beyond CME FX futures",

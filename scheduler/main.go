@@ -1150,7 +1150,7 @@ func main() {
 						notifier.SendOwnerDM,
 					)
 				}
-				// #361 phase 3: Live Robinhood crypto per-strategy circuit breaker
+				// #361 phase 3: Live Robinhood direct-share/crypto per-strategy circuit breaker
 				// closes. RH crypto has no reduce-only primitive, so each pending
 				// leg is a full-account market_sell guarded by a sole-ownership
 				// gate (DM the owner when a shared-coin config prevents a safe
@@ -3189,7 +3189,7 @@ func runRobinhoodCheck(sc StrategyConfig, prices map[string]float64, posCtx Posi
 	return result, signalStr, price, true
 }
 
-// runRobinhoodExecuteOrder places a live crypto order (Phase 3, no lock).
+// runRobinhoodExecuteOrder places a live Robinhood direct-share/crypto order (Phase 3, no lock).
 //
 // posSide is the current position side captured under RLock in Phase 1
 // ("long", "short", or "" for flat). We consult SpotOrderSkipReason BEFORE

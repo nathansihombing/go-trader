@@ -11,7 +11,9 @@ usage() {
 Usage: bash scripts/quickstart-profile.sh <profile> [symbols] [output]
 
 Profiles:
-  stocks      Robinhood stock-options starter. Symbols default to SPY,QQQ.
+  stocks      Robinhood direct stock-share starter. Symbols default to SPY,QQQ.
+  stock_options|stock-options
+              Robinhood stock-options starter. Symbols default to SPY,QQQ.
   currency    Currency/FX futures starter. Symbols default to 6E,6J.
   fx|forex    Alias for currency.
   crypto      Crypto spot starter. Symbols default to BTC,ETH.
@@ -43,8 +45,13 @@ symbols="${2:-}"
 output="${3:-scheduler/config.json}"
 
 case "$profile" in
-  stocks|stock|equities|equity)
+  stocks|stock|equities|equity|shares|stock_shares|stock-shares)
     init_profile="stocks"
+    symbol_flag="--stock-symbols"
+    symbols="${symbols:-SPY,QQQ}"
+    ;;
+  stock_options|stock-options|options|equity_options|equity-options)
+    init_profile="stock_options"
     symbol_flag="--stock-symbols"
     symbols="${symbols:-SPY,QQQ}"
     ;;

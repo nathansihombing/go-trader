@@ -150,3 +150,66 @@ class TestOrderExecution:
 
     def test_get_crypto_positions_not_logged_in(self, paper_adapter):
         assert paper_adapter.get_crypto_positions() == []
+
+
+def _fake_robinhood_module():
+    import types
+
+    return types.SimpleNamespace(
+        orders=types.SimpleNamespace(
+            order_buy_crypto_by_price=MagicMock(return_value={"id": "crypto-buy"}),
+            order_sell_crypto_by_quantity=MagicMock(return_value={"id": "crypto-sell"}),
+            order_buy_fractional_by_price=MagicMock(return_value={"id": "stock-buy"}),
+            order_sell_fractional_by_quantity=MagicMock(return_value={"id": "stock-sell"}),
+        ),
+        account=types.SimpleNamespace(
+            build_holdings=MagicMock(return_value={
+                "AAPL": {"quantity": "1.25", "average_buy_price": "190.50"},
+                "CASH": {"quantity": "0", "average_buy_price": "1"},
+            })
+        ),
+        crypto=types.SimpleNamespace(get_crypto_positions=MagicMock(return_value=[])),
+    )
+
+
+def _live_adapter_without_login():
+    adapter = RobinhoodExchangeAdapter(mode="paper")
+    adapter._mode = "live"
+    adapter._logged_in = True
+    return adapter
+
+
+class TestDirectStockShares:
+    def test_market_buy_routes_stock_to_fractional_dollar_order(self):
+        fake_rh = _fake_robinhood_module()
+        adapter = _live_adapter_without_login()
+        with patch.dict(sys.modules, {"robin_stocks.robinhood": fake_rh}):
+            result = adapter.market_buy("aapl", 250.0)
+        assert result == {"id": "stock-buy"}
+        fake_rh.orders.order_buy_fractional_by_price.assert_called_once_with("AAPL", 250.0)
+        fake_rh.orders.order_buy_crypto_by_price.assert_not_called()
+
+    def test_market_sell_routes_stock_to_fractional_quantity_order(self):
+        fake_rh = _fake_robinhood_module()
+        adapter = _live_adapter_without_login()
+        with patch.dict(sys.modules, {"robin_stocks.robinhood": fake_rh}):
+            result = adapter.market_sell("msft", 0.75)
+        assert result == {"id": "stock-sell"}
+        fake_rh.orders.order_sell_fractional_by_quantity.assert_called_once_with("MSFT", 0.75)
+        fake_rh.orders.order_sell_crypto_by_quantity.assert_not_called()
+
+    def test_market_buy_keeps_crypto_on_crypto_endpoint(self):
+        fake_rh = _fake_robinhood_module()
+        adapter = _live_adapter_without_login()
+        with patch.dict(sys.modules, {"robin_stocks.robinhood": fake_rh}):
+            result = adapter.market_buy("BTC", 100.0)
+        assert result == {"id": "crypto-buy"}
+        fake_rh.orders.order_buy_crypto_by_price.assert_called_once_with("BTC", 100.0)
+        fake_rh.orders.order_buy_fractional_by_price.assert_not_called()
+
+    def test_get_stock_positions_strict_reads_direct_share_holdings(self):
+        fake_rh = _fake_robinhood_module()
+        adapter = _live_adapter_without_login()
+        with patch.dict(sys.modules, {"robin_stocks.robinhood": fake_rh}):
+            positions = adapter.get_stock_positions_strict()
+        assert positions == [{"symbol": "AAPL", "quantity": 1.25, "avg_price": 190.5}]

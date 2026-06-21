@@ -1,7 +1,7 @@
 """
 Robinhood Exchange Adapter.
 
-Supports crypto spot trading and US stock options.
+Supports crypto spot trading, direct US stock shares, and US stock options.
 Paper mode: yfinance for OHLCV/prices, Black-Scholes for options pricing.
 Live mode: robin_stocks for prices/chains/orders, TOTP MFA authentication.
 
@@ -51,12 +51,12 @@ def _get_strike_interval(price: float) -> float:
 
 class RobinhoodExchangeAdapter:
     """
-    Exchange adapter for Robinhood crypto + stock options trading.
+    Exchange adapter for Robinhood crypto, direct stock shares, and stock options trading.
 
     Paper mode:  no credentials needed; uses yfinance for OHLCV and price data,
                  Black-Scholes for options pricing.
     Live mode:   requires ROBINHOOD_USERNAME, ROBINHOOD_PASSWORD, ROBINHOOD_TOTP_SECRET;
-                 uses robin_stocks for live prices, options chains, and order execution.
+                 uses robin_stocks for live prices, stock/crypto orders, options chains, and order execution.
     """
 
     def __init__(self, mode="paper"):
@@ -108,6 +108,10 @@ class RobinhoodExchangeAdapter:
     # ─────────────────────────────────────────────
     # Market data (crypto + stocks)
     # ─────────────────────────────────────────────
+
+    def is_crypto_symbol(self, symbol: str) -> bool:
+        """Return True when a Robinhood symbol should use crypto order APIs."""
+        return symbol.upper() in YAHOO_CRYPTO_MAP
 
     def _resolve_yahoo_symbol(self, symbol: str) -> str:
         """Resolve symbol to yfinance ticker. Crypto uses map, stocks pass through."""
@@ -365,25 +369,57 @@ class RobinhoodExchangeAdapter:
 
     def market_buy(self, symbol: str, amount_usd: float) -> dict:
         """
-        Buy crypto by USD amount. Live mode only.
+        Buy crypto or stock shares by USD amount. Live mode only.
+
+        Crypto symbols use Robinhood Crypto's dollar-order endpoint. Stock/ETF
+        symbols use fractional share dollar orders so the Go scheduler can size
+        Robinhood stock buys exactly like spot crypto buys (cash budget in USD).
         Returns robin_stocks order response dict.
         """
         if not self.is_live:
             raise RuntimeError("market_buy requires live mode")
+        if amount_usd <= 0:
+            raise ValueError("amount_usd must be positive")
         import robin_stocks.robinhood as rh
-        result = rh.orders.order_buy_crypto_by_price(symbol, amount_usd)
+        if self.is_crypto_symbol(symbol):
+            result = rh.orders.order_buy_crypto_by_price(symbol, amount_usd)
+        else:
+            result = rh.orders.order_buy_fractional_by_price(symbol.upper(), amount_usd)
         return result or {}
 
     def market_sell(self, symbol: str, quantity: float) -> dict:
         """
-        Sell crypto by quantity. Live mode only.
+        Sell crypto or stock shares by quantity. Live mode only.
+
+        Crypto symbols use Robinhood Crypto quantity sells. Stock/ETF symbols
+        use fractional share quantity sells so partial close fractions from the
+        Go open/close registry can reduce direct stock positions precisely.
         Returns robin_stocks order response dict.
         """
         if not self.is_live:
             raise RuntimeError("market_sell requires live mode")
+        if quantity <= 0:
+            raise ValueError("quantity must be positive")
         import robin_stocks.robinhood as rh
-        result = rh.orders.order_sell_crypto_by_quantity(symbol, quantity)
+        if self.is_crypto_symbol(symbol):
+            result = rh.orders.order_sell_crypto_by_quantity(symbol, quantity)
+        else:
+            result = rh.orders.order_sell_fractional_by_quantity(symbol.upper(), quantity)
         return result or {}
+
+    def get_positions(self) -> list:
+        """Best-effort current crypto + stock-share positions from Robinhood."""
+        if not self._logged_in:
+            return []
+        try:
+            return self.get_positions_strict()
+        except Exception as e:
+            print(f"[robinhood] get_positions error: {e}", file=sys.stderr)
+            return []
+
+    def get_positions_strict(self) -> list:
+        """Strict current crypto + stock-share positions for kill-switch callers."""
+        return self.get_crypto_positions_strict() + self.get_stock_positions_strict()
 
     def get_crypto_positions(self) -> list:
         """Get current crypto positions from Robinhood.
@@ -429,6 +465,33 @@ class RobinhoodExchangeAdapter:
             avg_price = cost_basis / qty if qty > 0 else 0
             result.append({
                 "symbol": symbol,
+                "quantity": qty,
+                "avg_price": avg_price,
+            })
+        return result
+
+    def get_stock_positions_strict(self) -> list:
+        """Strict current direct stock/ETF positions from Robinhood."""
+        if not self._logged_in:
+            raise RuntimeError(
+                "Robinhood adapter not logged in — cannot fetch stock positions"
+            )
+        import robin_stocks.robinhood as rh
+        holdings = rh.account.build_holdings() or {}
+        result = []
+        for symbol, pos in holdings.items():
+            try:
+                qty = float(pos.get("quantity") or 0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            if qty <= 0:
+                continue
+            try:
+                avg_price = float(pos.get("average_buy_price") or 0)
+            except (TypeError, ValueError):
+                avg_price = 0.0
+            result.append({
+                "symbol": str(symbol).upper(),
                 "quantity": qty,
                 "avg_price": avg_price,
             })

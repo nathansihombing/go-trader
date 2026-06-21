@@ -1645,7 +1645,7 @@ func TestRunInitFromJSON_FXMarketProfileSkipsCryptoAssets(t *testing.T) {
 	}
 }
 
-func TestRunInitFromJSON_StocksMarketProfileDefaultsRobinhoodOptions(t *testing.T) {
+func TestRunInitFromJSON_StocksMarketProfileDefaultsRobinhoodShares(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "config.json")
 	code := runInitFromJSON(`{"marketProfile":"stocks"}`, out)
@@ -1661,10 +1661,45 @@ func TestRunInitFromJSON_StocksMarketProfileDefaultsRobinhoodOptions(t *testing.
 		t.Fatalf("output is not valid JSON: %v", err)
 	}
 	if len(cfg.Strategies) != 2 {
-		t.Fatalf("expected default SPY/QQQ Robinhood options strategies, got %d", len(cfg.Strategies))
+		t.Fatalf("expected default SPY/QQQ Robinhood share strategies, got %d", len(cfg.Strategies))
 	}
-	if cfg.Strategies[0].Capital != 5000 || cfg.Strategies[0].MaxDrawdownPct != 10 {
-		t.Fatalf("expected stock profile options capital/drawdown defaults, got capital=%g drawdown=%g", cfg.Strategies[0].Capital, cfg.Strategies[0].MaxDrawdownPct)
+	if cfg.Strategies[0].Capital != 500 || cfg.Strategies[0].MaxDrawdownPct != 5 {
+		t.Fatalf("expected stock profile share capital/drawdown defaults, got capital=%g drawdown=%g", cfg.Strategies[0].Capital, cfg.Strategies[0].MaxDrawdownPct)
+	}
+	ids := map[string]bool{}
+	symbols := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Type != "spot" || sc.Platform != "robinhood" || sc.Script != "shared_scripts/check_robinhood.py" {
+			t.Fatalf("expected robinhood direct share strategy, got type=%s platform=%s script=%s id=%s", sc.Type, sc.Platform, sc.Script, sc.ID)
+		}
+		if len(sc.Args) < 4 || sc.Args[3] != "--mode=paper" {
+			t.Fatalf("expected paper-mode Robinhood args, got %#v", sc.Args)
+		}
+		ids[sc.ID] = true
+		symbols[sc.Args[1]] = true
+	}
+	if !ids["rh-momentum-spy"] || !ids["rh-momentum-qqq"] || !symbols["SPY"] || !symbols["QQQ"] {
+		t.Fatalf("expected rh-momentum-spy/rh-momentum-qqq direct-share strategies, got ids=%#v symbols=%#v", ids, symbols)
+	}
+}
+
+func TestRunInitFromJSON_StockOptionsProfileDefaultsRobinhoodOptions(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "config.json")
+	code := runInitFromJSON(`{"marketProfile":"stock_options"}`, out)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(cfg.Strategies) != 2 {
+		t.Fatalf("expected default SPY/QQQ Robinhood options strategies, got %d", len(cfg.Strategies))
 	}
 	ids := map[string]bool{}
 	for _, sc := range cfg.Strategies {
@@ -1694,9 +1729,38 @@ func TestRunInitProfileFlagStocksCustomSymbols(t *testing.T) {
 		t.Fatalf("output is not valid JSON: %v", err)
 	}
 	ids := map[string]bool{}
+	symbols := map[string]bool{}
+	for _, sc := range cfg.Strategies {
+		if sc.Platform != "robinhood" || sc.Type != "spot" || sc.Script != "shared_scripts/check_robinhood.py" {
+			t.Fatalf("expected stock profile to emit Robinhood direct shares only, got type=%s platform=%s script=%s id=%s", sc.Type, sc.Platform, sc.Script, sc.ID)
+		}
+		ids[sc.ID] = true
+		symbols[sc.Args[1]] = true
+	}
+	if !ids["rh-momentum-aapl"] || !ids["rh-momentum-msft"] || !symbols["AAPL"] || !symbols["MSFT"] {
+		t.Fatalf("expected custom AAPL/MSFT stock-share strategies, got ids=%#v symbols=%#v", ids, symbols)
+	}
+}
+
+func TestRunInitProfileFlagStockOptionsCustomSymbols(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "stock-options.json")
+	code := runInit([]string{"--profile", "stock-options", "--stock-symbols", "AAPL,MSFT", "--output", out})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	ids := map[string]bool{}
 	for _, sc := range cfg.Strategies {
 		if sc.Platform != "robinhood" || sc.Type != "options" {
-			t.Fatalf("expected stock profile to emit Robinhood options only, got type=%s platform=%s id=%s", sc.Type, sc.Platform, sc.ID)
+			t.Fatalf("expected stock-options profile to emit Robinhood options only, got type=%s platform=%s id=%s", sc.Type, sc.Platform, sc.ID)
 		}
 		ids[sc.ID] = true
 	}

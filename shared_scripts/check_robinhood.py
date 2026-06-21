@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Robinhood crypto strategy check script.
+Robinhood direct stock-share / crypto strategy check script.
 Fetches OHLCV via yfinance, runs strategy, outputs JSON to stdout, exits.
 
 Signal check mode (paper or live):
     check_robinhood.py <strategy> <symbol> <timeframe> [--mode=paper|live]
 
 Execution mode (live only, called by Go as phase 2):
-    check_robinhood.py --execute --symbol=BTC --side=buy --amount_usd=950 [--mode=live]
-    check_robinhood.py --execute --symbol=BTC --side=sell --quantity=0.01 [--mode=live]
+    check_robinhood.py --execute --symbol=AAPL --side=buy --amount_usd=950 [--mode=live]
+    check_robinhood.py --execute --symbol=AAPL --side=sell --quantity=0.5 [--mode=live]
 """
 
 import sys
@@ -294,8 +294,52 @@ def run_signal_check(strategy_name, symbol, timeframe, mode, htf_filter_enabled=
         sys.exit(1)
 
 
+def _extract_fill(result):
+    fill = {}
+    if not isinstance(result, dict) or not result:
+        return fill
+
+    avg_px = _float_or_none(result.get("average_price") or result.get("price"))
+    filled_qty = _float_or_none(
+        result.get("cumulative_quantity")
+        or result.get("quantity")
+        or result.get("filled_quantity")
+    )
+
+    executions = result.get("executions")
+    if isinstance(executions, list) and executions:
+        total_qty = 0.0
+        total_notional = 0.0
+        for execution in executions:
+            if not isinstance(execution, dict):
+                continue
+            qty = _float_or_none(execution.get("quantity") or execution.get("shares"))
+            px = _float_or_none(execution.get("price") or execution.get("effective_price"))
+            if qty is None or qty <= 0:
+                continue
+            total_qty += qty
+            if px is not None and px > 0:
+                total_notional += qty * px
+        if total_qty > 0:
+            filled_qty = total_qty
+            if total_notional > 0:
+                avg_px = total_notional / total_qty
+
+    if avg_px is not None and avg_px > 0:
+        fill["avg_px"] = avg_px
+    if filled_qty is not None and filled_qty > 0:
+        fill["quantity"] = filled_qty
+    fee = _extract_fee(result)
+    if fee is not None:
+        fill["fee"] = fee
+    oid = result.get("id") or result.get("ref_id") or result.get("order_id")
+    if oid:
+        fill["oid"] = str(oid)
+    return fill
+
+
 def run_execute(symbol, side, amount_usd, quantity, mode):
-    """Place a live crypto order on Robinhood."""
+    """Place a live direct stock-share or crypto order on Robinhood."""
     if mode != "live":
         print(json.dumps({"error": "--execute requires --mode=live"}))
         sys.exit(1)
@@ -311,22 +355,11 @@ def run_execute(symbol, side, amount_usd, quantity, mode):
         else:
             result = adapter.market_sell(symbol, quantity)
 
-        # Extract fill info from robin_stocks response
-        fill = {}
-        try:
-            if result:
-                avg_px = float(result.get("average_price", 0) or 0)
-                filled_qty = float(result.get("cumulative_quantity", 0) or 0)
-                if avg_px > 0:
-                    fill = {"avg_px": avg_px, "quantity": filled_qty}
-                    fee = _extract_fee(result)
-                    if fee is not None:
-                        fill["fee"] = fee
-                    oid = result.get("id")
-                    if oid:
-                        fill["oid"] = str(oid)
-        except Exception:
-            pass
+        # Extract fill info from robin_stocks response. Crypto orders commonly
+        # return average_price/cumulative_quantity; stock fractional orders can
+        # also return executions with price/quantity rows. Surface one common
+        # fill shape so Go books direct stocks exactly like spot crypto.
+        fill = _extract_fill(result)
 
         execution = {
             "action": "buy" if is_buy else "sell",
