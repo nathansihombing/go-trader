@@ -7,8 +7,8 @@ import (
 	"sort"
 )
 
-// RobinhoodPosition represents a live Robinhood crypto position. Size is
-// unsigned — Robinhood crypto is spot, so no short exposure exists.
+// RobinhoodPosition represents a live Robinhood direct-share or crypto position. Size is
+// unsigned — Robinhood spot exposure has no short position here.
 // Mirrors HLPosition / OKXPosition so the kill-switch plan builder can
 // treat all platforms symmetrically.
 type RobinhoodPosition struct {
@@ -26,7 +26,7 @@ var robinhoodLiveCloseScript = "shared_scripts/close_robinhood_position.py"
 var robinhoodFetchPositionsScript = "shared_scripts/fetch_robinhood_positions.py"
 
 // RobinhoodLiveCloser submits a market sell for the full on-account quantity
-// of a single Robinhood crypto coin and returns the parsed result. Exposed
+// of a single Robinhood direct-share/crypto symbol and returns the parsed result. Exposed
 // as a function variable so tests can inject a fake without spawning Python.
 // Production implementation is defaultRobinhoodLiveCloser, which shells out
 // to close_robinhood_position.py via RunRobinhoodClose.
@@ -44,7 +44,7 @@ func defaultRobinhoodLiveCloser(symbol string) (*RobinhoodCloseResult, error) {
 	return result, err
 }
 
-// RobinhoodPositionsFetcher fetches every open Robinhood crypto position on
+// RobinhoodPositionsFetcher fetches every open Robinhood direct-share/crypto position on
 // the account. Exposed as a function type so tests can stub — mirrors
 // HLStateFetcher / OKXPositionsFetcher.
 type RobinhoodPositionsFetcher func() ([]RobinhoodPosition, error)
@@ -89,7 +89,7 @@ type RobinhoodLiveCloseReport struct {
 	Errors       map[string]error
 }
 
-// ConfirmedFlat reports whether every configured live Robinhood crypto coin
+// ConfirmedFlat reports whether every configured live Robinhood direct-share/crypto symbol
 // reached a terminal closed/flat state without errors. Mirrors HL/OKX shape.
 func (r RobinhoodLiveCloseReport) ConfirmedFlat() bool {
 	return len(r.Errors) == 0
@@ -109,9 +109,9 @@ func (r RobinhoodLiveCloseReport) SortedErrorCoins() []string {
 }
 
 // forceCloseRobinhoodLive submits market closes for every non-zero live
-// Robinhood crypto position belonging to a coin a configured live Robinhood
-// crypto strategy trades on this account. Mirrors forceCloseHyperliquidLive /
-// forceCloseOKXLive. Robinhood crypto is spot with no reduce-only primitive,
+// Robinhood direct-share/crypto position belonging to a symbol a configured live Robinhood
+// spot strategy trades on this account. Mirrors forceCloseHyperliquidLive /
+// forceCloseOKXLive. Robinhood direct shares/crypto are spot with no reduce-only primitive,
 // so this sells the full on-account balance for each configured coin —
 // acceptable because kill switch only acts on coins the scheduler is
 // authorized to trade (the operator's configuration opts in).
@@ -124,7 +124,7 @@ func (r RobinhoodLiveCloseReport) SortedErrorCoins() []string {
 // expires, remaining unprocessed coins are added to Errors so the kill
 // switch stays latched and retries next cycle.
 //
-// Only crypto (Type == "spot") strategies are considered. Robinhood stock
+// Only direct-share/crypto spot (Type == "spot") strategies are considered. Robinhood stock
 // options (Type == "options") are NOT closed here — their close semantics
 // (sell-to-close vs buy-to-close per leg) and multi-leg instrument IDs
 // require separate handling. The plan surfaces options strategies as a

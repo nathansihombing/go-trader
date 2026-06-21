@@ -1,0 +1,37 @@
+[
+  {
+    "title": "Add CI job for profile quickstart and preflight-json smoke tests",
+    "labels": ["enhancement", "ci"],
+    "body": "## Goal\nAdd a CI workflow that builds `go-trader`, generates stock/currency/crypto profile configs, and validates `--preflight-json` output.\n\n## Acceptance criteria\n- Build scheduler binary in CI.\n- Run `go-trader init --profile stocks --stock-symbols SPY --output <tmp>`.\n- Run `go-trader init --profile currency --currency-symbols 6E --output <tmp>`.\n- Run `go-trader init --profile crypto --assets BTC --output <tmp>`.\n- Assert `--preflight-json` emits parseable JSON with `status`, `exit_code`, and `issues`.\n- Keep tests offline or mocked where possible."
+  },
+  {
+    "title": "Add more direct stock-share brokers beyond Robinhood",
+    "labels": ["enhancement", "stocks"],
+    "body": "## Goal\nThe `stocks` profile now creates direct Robinhood stock-share strategies. Add another broker path (for example IBKR shares) for users who do not want to trade through Robinhood.\n\n## Acceptance criteria\n- Select the next direct-equities broker/platform.\n- Add adapter/script execution support for share orders.\n- Add init/profile defaults and credential preflight checks.\n- Keep the Robinhood direct-share profile working."
+  },
+  {
+    "title": "Add currency/FX live trading path beyond CME FX futures",
+    "labels": ["enhancement", "currency", "fx"],
+    "body": "## Goal\nThe `currency`/`fx` profile currently routes to TopStep/CME FX futures. Add or document a direct FX/currency trading path if the desired product is spot FX rather than futures.\n\n## Acceptance criteria\n- Decide target broker/platform for spot FX or currency CFDs.\n- Add adapter and check script if supported.\n- Add profile defaults and preflight credential checks.\n- Keep CME FX futures profile working."
+  },
+  {
+    "title": "Add mocked quickstart smoke tests for scripts/quickstart-profile.sh",
+    "labels": ["testing", "quickstart"],
+    "body": "## Goal\nTest the quickstart helper script without relying on external market data or credentials.\n\n## Acceptance criteria\n- Add tests for `--help`, unknown profile rejection, config backup behavior, `STRICT=1`, and `RUN_ONCE=1` wiring.\n- Mock or stub `./go-trader` where full binary execution is not needed.\n- Ensure tests run in CI without network access."
+  },
+  {
+    "title": "Expand preflight audit to cover state DB, writable paths, and status-port readiness",
+    "labels": ["enhancement", "safety"],
+    "body": "## Goal\nPreflight currently checks config risk rails, runtime files, credentials, and perps stop losses. Expand it to catch more operational failures before daemon startup.\n\n## Acceptance criteria\n- Check DB parent directory exists and is writable.\n- Warn when state DB is missing for live strategies unless explicitly allowed.\n- Check log directory parent is writable.\n- Optionally validate requested status port availability.\n- Add unit tests for each finding."
+  },
+  {
+    "title": "Document live credential setup for stocks, currency futures, crypto, and OKX",
+    "labels": ["documentation", "safety"],
+    "body": "## Goal\nCreate a single operator doc for live credential environment variables and safe live-mode rollout.\n\n## Acceptance criteria\n- Cover Hyperliquid, TopStep, Robinhood, and OKX env vars.\n- Include `.env` example with placeholders only.\n- Explain paper vs live mode changes.\n- Link to `START_SAFE.md`, `QUICKSTART.md`, and preflight commands."
+  },
+  {
+    "title": "Add dashboard/status screenshots or examples to quickstart docs",
+    "labels": ["documentation", "dashboard"],
+    "body": "## Goal\nHelp new users verify that the bot is actually running by showing expected `/health`, `/status`, and dashboard output.\n\n## Acceptance criteria\n- Add sample `/health` response.\n- Add redacted/sample `/status` response.\n- Add dashboard URL and loopback/VPN guidance.\n- Include troubleshooting section for common startup failures."
+  }
+]

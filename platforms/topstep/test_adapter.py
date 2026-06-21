@@ -54,6 +54,18 @@ class TestContractSpecs:
         spec = adapter.get_contract_spec("NQ")
         assert spec["multiplier"] == 20
 
+    def test_get_fx_specs(self):
+        adapter = TopStepExchangeAdapter(mode="paper")
+        euro = adapter.get_contract_spec("6E")
+        yen = adapter.get_contract_spec("6J")
+        assert euro["type"] == "fx"
+        assert euro["tick_size"] == 0.00005
+        assert euro["tick_value"] == 6.25
+        assert euro["multiplier"] == 125000
+        assert yen["type"] == "fx"
+        assert yen["tick_size"] == 0.0000005
+        assert yen["tick_value"] == 6.25
+
     def test_unknown_symbol_raises(self):
         adapter = TopStepExchangeAdapter(mode="paper")
         with pytest.raises(ValueError, match="Unknown symbol"):
@@ -145,3 +157,8 @@ class TestYahooSymbolMap:
         assert YAHOO_SYMBOL_MAP["ES"] == "ES=F"
         assert YAHOO_SYMBOL_MAP["NQ"] == "NQ=F"
         assert YAHOO_SYMBOL_MAP["GC"] == "GC=F"
+        assert YAHOO_SYMBOL_MAP["6E"] == "6E=F"
+        assert YAHOO_SYMBOL_MAP["6J"] == "6J=F"
+        assert YAHOO_SYMBOL_MAP["6B"] == "6B=F"
+        assert YAHOO_SYMBOL_MAP["6C"] == "6C=F"
+        assert YAHOO_SYMBOL_MAP["6A"] == "6A=F"

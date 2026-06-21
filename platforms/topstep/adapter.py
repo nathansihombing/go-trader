@@ -25,6 +25,11 @@ YAHOO_SYMBOL_MAP = {
     "MNQ": "MNQ=F",
     "CL": "CL=F",
     "GC": "GC=F",
+    "6E": "6E=F",  # Euro FX
+    "6J": "6J=F",  # Japanese Yen FX
+    "6B": "6B=F",  # British Pound FX
+    "6C": "6C=F",  # Canadian Dollar FX
+    "6A": "6A=F",  # Australian Dollar FX
 }
 
 # CME contract specifications (margin = approximate CME initial margin per contract)
@@ -35,6 +40,11 @@ CONTRACT_SPECS = {
     "MNQ": {"tick_size": 0.25, "tick_value": 0.50, "multiplier": 2, "margin": 2100, "type": "index"},
     "CL": {"tick_size": 0.01, "tick_value": 10.00, "multiplier": 1000, "margin": 7500, "type": "energy"},
     "GC": {"tick_size": 0.10, "tick_value": 10.00, "multiplier": 100, "margin": 11000, "type": "metals"},
+    "6E": {"tick_size": 0.00005, "tick_value": 6.25, "multiplier": 125000, "margin": 2500, "type": "fx"},
+    "6J": {"tick_size": 0.0000005, "tick_value": 6.25, "multiplier": 12500000, "margin": 3000, "type": "fx"},
+    "6B": {"tick_size": 0.0001, "tick_value": 6.25, "multiplier": 62500, "margin": 2500, "type": "fx"},
+    "6C": {"tick_size": 0.00005, "tick_value": 5.00, "multiplier": 100000, "margin": 2000, "type": "fx"},
+    "6A": {"tick_size": 0.0001, "tick_value": 10.00, "multiplier": 100000, "margin": 2000, "type": "fx"},
 }
 
 

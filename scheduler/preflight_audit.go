@@ -2,13 +2,139 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
 // PreflightIssue is a startup-readiness finding surfaced by --preflight.
 type PreflightIssue struct {
-	Severity string // "error" or "warn"
-	Message  string
+	Severity string `json:"severity"` // "error" or "warn"
+	Message  string `json:"message"`
+}
+
+// PreflightReport is the machine-readable summary emitted by --preflight-json.
+type PreflightReport struct {
+	Status   string           `json:"status"`
+	Strict   bool             `json:"strict"`
+	ExitCode int              `json:"exit_code"`
+	Issues   []PreflightIssue `json:"issues"`
+}
+
+const (
+	preflightExitOK    = 0
+	preflightExitError = 2
+)
+
+// PreflightExitCode returns the process exit code for audit findings. In
+// strict mode warnings are treated as failures so CI/deploy scripts can enforce
+// a fully clean preflight before going live.
+func PreflightExitCode(issues []PreflightIssue, strict bool) int {
+	for _, it := range issues {
+		if it.Severity == "error" || (strict && it.Severity == "warn") {
+			return preflightExitError
+		}
+	}
+	return preflightExitOK
+}
+
+func PreflightStatus(issues []PreflightIssue) string {
+	status := "ok"
+	for _, it := range issues {
+		switch it.Severity {
+		case "error":
+			return "error"
+		case "warn":
+			if status == "ok" {
+				status = "warn"
+			}
+		}
+	}
+	return status
+}
+
+func BuildPreflightReport(issues []PreflightIssue, strict bool) PreflightReport {
+	if issues == nil {
+		issues = []PreflightIssue{}
+	}
+	return PreflightReport{
+		Status:   PreflightStatus(issues),
+		Strict:   strict,
+		ExitCode: PreflightExitCode(issues, strict),
+		Issues:   issues,
+	}
+}
+
+func argsMode(args []string) string {
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "--mode=") {
+			return strings.TrimSpace(strings.TrimPrefix(arg, "--mode="))
+		}
+		if arg == "--mode" && i+1 < len(args) {
+			return strings.TrimSpace(args[i+1])
+		}
+	}
+	return ""
+}
+
+func strategyIsLive(sc StrategyConfig) bool {
+	if sc.Type == "manual" {
+		return true
+	}
+	return strings.EqualFold(argsMode(sc.Args), "live")
+}
+
+func missingEnvVars(names ...string) []string {
+	missing := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func liveCredentialEnvVars(sc StrategyConfig) []string {
+	if !strategyIsLive(sc) {
+		return nil
+	}
+	switch sc.Platform {
+	case "hyperliquid":
+		return []string{"HYPERLIQUID_SECRET_KEY"}
+	case "topstep":
+		return []string{"TOPSTEP_API_KEY", "TOPSTEP_API_SECRET", "TOPSTEP_ACCOUNT_ID"}
+	case "robinhood":
+		return []string{"ROBINHOOD_USERNAME", "ROBINHOOD_PASSWORD", "ROBINHOOD_TOTP_SECRET"}
+	case "okx":
+		return []string{"OKX_API_KEY", "OKX_API_SECRET", "OKX_PASSPHRASE"}
+	}
+	return nil
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func appendRuntimeFileIssues(issues []PreflightIssue, cfg *Config) []PreflightIssue {
+	needsPython := false
+	for _, sc := range cfg.Strategies {
+		script := strings.TrimSpace(sc.Script)
+		if script == "" {
+			continue
+		}
+		needsPython = true
+		id := strings.TrimSpace(sc.ID)
+		if id == "" {
+			id = "<unknown>"
+		}
+		if !pathExists(script) {
+			issues = append(issues, PreflightIssue{Severity: "error", Message: fmt.Sprintf("strategy[%s] script not found: %s", id, script)})
+		}
+	}
+	if needsPython && !pathExists(".venv/bin/python3") {
+		issues = append(issues, PreflightIssue{Severity: "error", Message: ".venv/bin/python3 not found; run `uv sync` before starting go-trader"})
+	}
+	return issues
 }
 
 // BuildPreflightAudit reports common operator misconfigurations before live use.

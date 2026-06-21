@@ -6,7 +6,7 @@
 
 A Go + Python hybrid trading system. A single Go binary (~8MB idle RAM) orchestrates 50+ strategies across spot, options, perpetual futures, and CME futures by spawning short-lived Python scripts. Both paper and live execution are supported per strategy.
 
-Supported platforms: Binance US, Deribit, IBKR/CME, Hyperliquid, TopStep, Robinhood (crypto + stock options), OKX (spot + perps + options), Luno. Per-platform Discord/Telegram channels post hourly summaries plus immediate trade alerts. When a new release ships, the bot DMs the configured owner — reply **yes** and it pulls, rebuilds, and restarts itself.
+Supported platforms: Binance US, Deribit, IBKR/CME, Hyperliquid, TopStep, Robinhood (direct stock shares + crypto + stock options), OKX (spot + perps + options), Luno. Per-platform Discord/Telegram channels post hourly summaries plus immediate trade alerts. When a new release ships, the bot DMs the configured owner — reply **yes** and it pulls, rebuilds, and restarts itself.
 
 Join the Discord: [https://discord.gg/46d7Fa2dXz](https://discord.gg/46d7Fa2dXz)
 
@@ -24,6 +24,27 @@ install https://github.com/richkuo/go-trader and init.
 
 Give your AI agent [SKILL.md](SKILL.md) (raw: `https://raw.githubusercontent.com/richkuo/go-trader/main/SKILL.md`) — it clones the repo, installs deps, walks through configuration, builds the binary, and starts the service. For non-Claude agents see [AGENTS.md](AGENTS.md). Using [OpenClaw](https://openclaw.ai) or [Hermes](https://hermes-agent.nousresearch.com/)? Just say "Set up go-trader".
 
+### Fast paper-mode quickstart
+
+If you just want to get a stock, currency/FX, or crypto paper-mode starter running, follow [QUICKSTART.md](QUICKSTART.md). It includes exact build, profile init, preflight, one-cycle smoke test, and status-server commands.
+
+Copy/paste one of these to build, generate a paper config, run preflight, start the bot in the background, and poll `/health`:
+
+```bash
+START=1 bash scripts/quickstart-profile.sh stocks SPY,QQQ
+START=1 bash scripts/quickstart-profile.sh currency 6E,6J
+START=1 bash scripts/quickstart-profile.sh crypto BTC,ETH
+```
+
+Then check it:
+
+```bash
+curl -s localhost:8099/health
+curl -s localhost:8099/status | python3 -m json.tool
+```
+
+Stop the background quickstart process with `kill "$(cat ./go-trader.pid)"`.
+
 ### Interactive Setup (go-trader init)
 
 After building the binary, run the config wizard:
@@ -32,14 +53,23 @@ After building the binary, run the config wizard:
 ./go-trader init
 ```
 
-It starts with a market profile (`crypto`, `stocks`, `fx`, or `mixed`), then walks the relevant strategy/platform/capital/risk/Discord choices and writes `scheduler/config.json`. Crypto asset selection is skipped for stock-only and FX-futures-only setups; the `fx` profile defaults futures symbols to `6E`/`6J`, while the `stocks` profile defaults options to Robinhood stock options. Risk prompts (warn threshold, portfolio kill-switch) appear only when live trading is selected.
+It starts with a market profile (`crypto`, `stocks`, `stock_options`, `currency`/`fx`, or `mixed`), then walks the relevant strategy/platform/capital/risk/Discord choices and writes `scheduler/config.json`. Crypto asset selection is skipped for stock-only and currency/FX-futures-only setups; the `currency`/`fx` profile defaults futures symbols to `6E`/`6J`, while the `stocks` profile defaults to direct Robinhood stock-share strategies and `stock_options` keeps the Robinhood options workflow. Profile aliases are accepted (`equities`/`equity` for stocks, `forex`/`currencies` for currency), but unknown profiles are rejected instead of silently falling back to crypto. Risk prompts (warn threshold, portfolio kill-switch) appear only when live trading is selected.
 
-For scripted deployments, use `--json`:
+For scripted deployments, use `--json`, or the lighter `--profile` shortcut for market-focused starter configs:
 
 ```bash
 ./go-trader init --json '{"assets":["BTC"],"enableSpot":true,"spotStrategies":["sma_crossover"],"spotCapital":1000,"spotDrawdown":10}' --output config.json
+./go-trader init --profile stocks --stock-symbols AAPL,MSFT --output stocks.json
+./go-trader init --profile stocks --stock-symbols AAPL --mode live --output stocks-live.json
+./go-trader init --profile stock_options --stock-symbols SPY,QQQ --output stock-options.json
+./go-trader init --profile currency --currency-symbols 6E,6J --output currency.json
 ```
 
+
+
+### Operator checklist and follow-up issues
+
+For the full clone → paper → live readiness checklist, see [docs/OPERATOR_CHECKLIST.md](docs/OPERATOR_CHECKLIST.md). Follow-up work is tracked in [docs/github_issues.json](docs/github_issues.json); if you have GitHub CLI installed, run `bash scripts/create-github-issues.sh` to create those issues.
 
 ### Pre-flight safety checklist
 
@@ -49,9 +79,11 @@ You can also run a built-in config audit before go-live:
 
 ```bash
 ./go-trader --config scheduler/config.json --preflight
+./go-trader --config scheduler/config.json --preflight-strict   # CI/deploy gate: warnings fail too
+./go-trader --config scheduler/config.json --preflight-json     # machine-readable report
 ```
 
-It exits non-zero on critical findings and prints warnings for risky-but-allowed setups.
+`--preflight` exits non-zero on critical findings (including missing live-trading credential environment variables, missing strategy scripts, or a missing `.venv/bin/python3`) and prints warnings for risky-but-allowed setups; `--preflight-strict` also exits non-zero on warnings so scripts can require a completely clean audit. Use `--preflight-json` when CI or deployment tooling needs a stable JSON report (`status`, `strict`, `exit_code`, and `issues`).
 
 ### Manual Setup
 
@@ -114,7 +146,8 @@ Strategies are auto-discovered from `shared_strategies/` at `go-trader init` tim
 | IBKR/CME | Options | BTC, ETH | IBKR creds | Black-Scholes |
 | Hyperliquid | Perps | any HL-listed | `HYPERLIQUID_SECRET_KEY` | SDK public |
 | TopStep | Futures | ES, NQ, MES, MNQ, CL, GC, 6E, 6J, 6B, 6C, 6A | `TOPSTEP_API_KEY` / `_SECRET` / `_ACCOUNT_ID` | yfinance |
-| Robinhood | Crypto | BTC, ETH, SOL, DOGE, … | `ROBINHOOD_USERNAME` / `_PASSWORD` / `_TOTP_SECRET` | yfinance |
+| Robinhood | Direct stock shares | SPY, QQQ, AAPL, MSFT, … | `ROBINHOOD_USERNAME` / `_PASSWORD` / `_TOTP_SECRET` | yfinance |
+| Robinhood | Crypto | BTC, ETH, SOL, DOGE, … | (same as above) | yfinance |
 | Robinhood | Stock options | SPY, QQQ, AAPL, … | (same as above) | Black-Scholes |
 | OKX | Spot + Perps + Options | BTC, ETH, SOL | `OKX_API_KEY` / `_SECRET` / `_PASSPHRASE` (`OKX_SANDBOX=1` for demo) | CCXT public |
 | Luno | Spot | BTC, ETH, … | Luno creds | CCXT public |
@@ -373,8 +406,8 @@ Open-position lines append `SL: $<trigger_px> (<signed_pct>%)` when a Hyperliqui
 
 ## Risk Management
 
-- **Portfolio kill switch** — halts trading at `portfolio_risk.max_drawdown_pct` (default 25); submits real close orders on HL / OKX perps / Robinhood crypto / TopStep, clearing virtual state only after every platform confirms flat.
-- **Per-strategy circuit breakers** — pause on max-drawdown breach (24h cooldown); peak-relative for spot/options/futures, margin-relative for perps. HL/OKX perps, Robinhood crypto, and TopStep CBs auto-close reduce-only; OKX spot and Robinhood options surface an `operator-required` warning every cycle until flattened by hand.
+- **Portfolio kill switch** — halts trading at `portfolio_risk.max_drawdown_pct` (default 25); submits real close orders on HL / OKX perps / Robinhood direct shares+crypto / TopStep, clearing virtual state only after every platform confirms flat.
+- **Per-strategy circuit breakers** — pause on max-drawdown breach (24h cooldown); peak-relative for spot/options/futures, margin-relative for perps. HL/OKX perps, Robinhood direct shares/crypto, and TopStep CBs auto-close; OKX spot and Robinhood options surface an `operator-required` warning every cycle until flattened by hand.
 - **Hyperliquid stop-loss** — exchange-side reduce-only trigger via one of `stop_loss_pct` / `stop_loss_margin_pct` / `stop_loss_atr_mult` / `trailing_stop_pct` / `trailing_stop_atr_mult` (mutually exclusive when positive). All five omitted → fixed ATR stop at `default_stop_loss_atr_mult * entry_atr` (default `1.0`); explicit `0` opts out. Trailing stops debounce via `trailing_stop_min_move_pct` to stay under HL's 1000-OID cap.
 - **On-chain N-tier TP/SL ladders** — `tiered_tp_atr` / `tiered_tp_atr_live` close evaluators place reduce-only TPs at configured ATR multiples (default `[{1×, 0.5}, {2×, 1.0}]`); final tier absorbs rounding dust. Full close cancels all SL+TP OIDs in one shot.
 - **Regime gate** — per-strategy `allowed_regimes` blocks new entries outside the whitelist; closes always run.
@@ -405,6 +438,7 @@ Built-in mappings cover known OKX/BinanceUS pairs; add `tradingview_export.symbo
 | IBKR/CME Options | $0.25/contract | — |
 | Hyperliquid Perps | 0.035% taker | ±0.05% |
 | TopStep Futures | Per-contract (configurable) | ±0.05% |
+| Robinhood Stock Shares | No commission (spread embedded) | ±0.05% |
 | Robinhood Crypto | No commission (spread embedded) | ±0.05% |
 | Robinhood Options | $0.03/contract (regulatory fee) | — |
 

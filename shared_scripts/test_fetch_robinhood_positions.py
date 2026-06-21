@@ -5,7 +5,7 @@ Regression target: the #346 review caught that the adapter's
 ``get_crypto_positions()`` swallowed exceptions and returned [], which
 the Go-side parser would then read as "no positions" → ConfirmedFlat=True
 → virtual state cleared while live exposure remained. The script now
-calls ``get_crypto_positions_strict()`` so any adapter failure surfaces
+calls ``get_positions_strict()`` so any adapter failure surfaces
 as a JSON error envelope and the kill switch latches.
 """
 
@@ -24,7 +24,7 @@ def _run_script(positions_or_exc, is_live=True):
     """Invoke fetch_robinhood_positions.main() with a mocked adapter.
 
     positions_or_exc may be a list (returned by
-    adapter.get_crypto_positions_strict) or an Exception. Returns
+    adapter.get_positions_strict) or an Exception. Returns
     (parsed_stdout_json, exit_code).
     """
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -38,9 +38,9 @@ def _run_script(positions_or_exc, is_live=True):
     mock_adapter.is_live = is_live
     mock_adapter_cls.return_value = mock_adapter
     if isinstance(positions_or_exc, Exception):
-        mock_adapter.get_crypto_positions_strict.side_effect = positions_or_exc
+        mock_adapter.get_positions_strict.side_effect = positions_or_exc
     else:
-        mock_adapter.get_crypto_positions_strict.return_value = positions_or_exc
+        mock_adapter.get_positions_strict.return_value = positions_or_exc
 
     captured = StringIO()
     exit_code = {"value": 0}
@@ -118,7 +118,7 @@ class TestFailurePaths:
 
     def test_not_logged_in_raises(self):
         out, code = _run_script(
-            RuntimeError("Robinhood adapter not logged in — cannot fetch crypto positions")
+            RuntimeError("Robinhood adapter not logged in — cannot fetch positions")
         )
         assert code == 1
         assert "not logged in" in out["error"]

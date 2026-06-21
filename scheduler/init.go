@@ -187,7 +187,7 @@ var supportedFuturesSymbols = []string{
 	"6E", "6J", "6B", "6C", "6A", // major FX futures (EUR, JPY, GBP, CAD, AUD)
 }
 
-// Supported stock symbols for Robinhood options.
+// Supported stock/ETF symbols for Robinhood direct shares and options.
 var supportedStockSymbols = []string{"SPY", "QQQ", "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "META"}
 
 // Live strategy lists — populated by discoverStrategies() at startup.
@@ -258,16 +258,19 @@ func discoverStrategies() {
 }
 
 const (
-	marketProfileCrypto = "crypto"
-	marketProfileStocks = "stocks"
-	marketProfileFX     = "fx"
-	marketProfileMixed  = "mixed"
+	marketProfileCrypto       = "crypto"
+	marketProfileStocks       = "stocks"
+	marketProfileStockOptions = "stock_options"
+	marketProfileFX           = "fx"
+	marketProfileMixed        = "mixed"
 )
 
 func normalizeMarketProfile(profile string) string {
 	switch strings.ToLower(strings.TrimSpace(profile)) {
-	case marketProfileStocks, "stock", "equities", "equity":
+	case marketProfileStocks, "stock", "equities", "equity", "shares", "stock_shares", "stock-shares":
 		return marketProfileStocks
+	case marketProfileStockOptions, "stock-options", "options", "equity_options", "equity-options":
+		return marketProfileStockOptions
 	case marketProfileFX, "forex", "currency", "currencies":
 		return marketProfileFX
 	case marketProfileMixed, "all":
@@ -279,9 +282,24 @@ func normalizeMarketProfile(profile string) string {
 	}
 }
 
+func isKnownMarketProfile(profile string) bool {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", marketProfileCrypto, marketProfileStocks, "stock", "equities", "equity", "shares", "stock_shares", "stock-shares", marketProfileStockOptions, "stock-options", "options", "equity_options", "equity-options", marketProfileFX, "forex", "currency", "currencies", marketProfileMixed, "all":
+		return true
+	default:
+		return false
+	}
+}
+
+func marketProfileUsage() string {
+	return "crypto, stocks (direct shares; aliases: stock/equities/equity/shares), stock_options (aliases: stock-options/options), currency (aliases: fx/forex/currencies), or mixed"
+}
+
 func defaultStrategyTypesForMarketProfile(profile string) []string {
 	switch normalizeMarketProfile(profile) {
 	case marketProfileStocks:
+		return []string{"robinhood"}
+	case marketProfileStockOptions:
 		return []string{"options"}
 	case marketProfileFX:
 		return []string{"futures"}
@@ -293,7 +311,7 @@ func defaultStrategyTypesForMarketProfile(profile string) []string {
 }
 
 func defaultOptionPlatformsForMarketProfile(profile string) []string {
-	if normalizeMarketProfile(profile) == marketProfileStocks {
+	if normalizeMarketProfile(profile) == marketProfileStockOptions {
 		return []string{"robinhood"}
 	}
 	return []string{"deribit"}
@@ -307,7 +325,10 @@ func defaultFuturesSymbolsForMarketProfile(profile string) []string {
 }
 
 func initOptionsNeedsCryptoAssets(opts InitOptions) bool {
-	if opts.EnableSpot || opts.EnablePerps || opts.EnableLuno || opts.EnableOKX || opts.EnableRobinhood {
+	if opts.EnableSpot || opts.EnablePerps || opts.EnableLuno || opts.EnableOKX {
+		return true
+	}
+	if opts.EnableRobinhood && len(opts.RobinhoodSymbols) == 0 {
 		return true
 	}
 	if opts.EnableOptions {
@@ -331,6 +352,8 @@ func applyMarketProfileDefaults(opts *InitOptions) {
 	if !hasAnyEnabledStrategyType(*opts) {
 		switch profile {
 		case marketProfileStocks:
+			opts.EnableRobinhood = true
+		case marketProfileStockOptions:
 			opts.EnableOptions = true
 		case marketProfileFX:
 			opts.EnableFutures = true
@@ -342,11 +365,23 @@ func applyMarketProfileDefaults(opts *InitOptions) {
 			opts.EnableSpot = true
 		}
 	}
+	if profile == marketProfileStocks && opts.EnableRobinhood && len(opts.RobinhoodSymbols) == 0 {
+		opts.RobinhoodSymbols = []string{"SPY", "QQQ"}
+	}
+	if profile == marketProfileStocks && opts.EnableRobinhood && len(opts.RobinhoodStrategies) == 0 {
+		opts.RobinhoodStrategies = []string{starterSpotStrategyID}
+	}
 	if opts.EnableOptions && len(opts.OptionPlatforms) == 0 {
 		opts.OptionPlatforms = defaultOptionPlatformsForMarketProfile(profile)
 	}
 	if opts.EnableOptions && len(opts.OptStrategies) == 0 {
 		opts.OptStrategies = []string{"vol_mean_reversion"}
+	}
+	if opts.EnableOptions && opts.OptionsCapital == 0 {
+		opts.OptionsCapital = 5000
+	}
+	if opts.EnableOptions && opts.OptionsDrawdown == 0 {
+		opts.OptionsDrawdown = 10
 	}
 	if opts.EnableFutures && len(opts.FuturesSymbols) == 0 {
 		opts.FuturesSymbols = defaultFuturesSymbolsForMarketProfile(profile)
@@ -383,6 +418,18 @@ func applyMinimalStarterDefaults(opts *InitOptions) {
 	}
 }
 
+func splitCSVArg(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 func selectionDefaults(options []string, preferred []string, fallbackFirst bool) []int {
 	indexByValue := make(map[string]int, len(options))
 	for i, option := range options {
@@ -403,7 +450,7 @@ func selectionDefaults(options []string, preferred []string, fallbackFirst bool)
 // InitOptions captures all user choices from the interactive wizard.
 type InitOptions struct {
 	OutputPath              string
-	MarketProfile           string   `json:"marketProfile,omitempty"` // "crypto", "stocks", "fx", or "mixed"
+	MarketProfile           string   `json:"marketProfile,omitempty"` // "crypto", "stocks", "stock_options", "currency"/"fx", or "mixed"
 	Assets                  []string // selected asset names, e.g. ["BTC", "ETH"]
 	EnableSpot              bool
 	EnableOptions           bool
@@ -438,7 +485,8 @@ type InitOptions struct {
 	LunoDrawdown            float64
 	EnableRobinhood         bool
 	RobinhoodMode           string   // "paper" or "live"
-	RobinhoodStrategies     []string // selected crypto strategy IDs
+	RobinhoodStrategies     []string // selected spot strategy IDs for Robinhood crypto/stocks
+	RobinhoodSymbols        []string // direct stock/ETF symbols for Robinhood shares (e.g. ["SPY", "QQQ"])
 	RobinhoodCapital        float64
 	RobinhoodDrawdown       float64
 	RobinhoodOptionsSymbols []string // stock tickers for Robinhood options (e.g. ["SPY", "QQQ"])
@@ -698,18 +746,26 @@ func generateConfig(opts InitOptions) *Config {
 		}
 	}
 
-	// Robinhood crypto strategies (reuses spot strategies on Robinhood crypto).
+	// Robinhood direct stock-share / crypto spot strategies.
 	if opts.EnableRobinhood {
+		symbols := opts.RobinhoodSymbols
+		if len(symbols) == 0 {
+			symbols = opts.Assets
+		}
 		for _, stratID := range opts.RobinhoodStrategies {
 			shortName := deriveShortName(stratID)
-			for _, assetName := range opts.Assets {
-				id := fmt.Sprintf("rh-%s-%s", shortName, strings.ToLower(assetName))
+			for _, symbol := range symbols {
+				symbol = strings.ToUpper(strings.TrimSpace(symbol))
+				if symbol == "" {
+					continue
+				}
+				id := fmt.Sprintf("rh-%s-%s", shortName, strings.ToLower(symbol))
 				cfg.Strategies = append(cfg.Strategies, StrategyConfig{
 					ID:              id,
 					Type:            "spot",
 					Platform:        "robinhood",
 					Script:          "shared_scripts/check_robinhood.py",
-					Args:            []string{stratID, assetName, "1h", fmt.Sprintf("--mode=%s", opts.RobinhoodMode)},
+					Args:            []string{stratID, symbol, "1h", fmt.Sprintf("--mode=%s", opts.RobinhoodMode)},
 					Capital:         opts.RobinhoodCapital,
 					MaxDrawdownPct:  opts.RobinhoodDrawdown,
 					IntervalSeconds: 3600,
@@ -855,6 +911,11 @@ func runInitFromJSON(jsonStr string, outputPath string) int {
 		}
 	}
 
+	if !isKnownMarketProfile(opts.MarketProfile) {
+		fmt.Fprintf(os.Stderr, "Error: unknown marketProfile %q (expected %s)\n", opts.MarketProfile, marketProfileUsage())
+		return 1
+	}
+
 	applyMarketProfileDefaults(&opts)
 	applyMinimalStarterDefaults(&opts)
 
@@ -933,9 +994,7 @@ func runInitFromJSON(jsonStr string, outputPath string) int {
 			opts.RobinhoodMode = "paper"
 		}
 		if len(opts.RobinhoodStrategies) == 0 {
-			for _, s := range spotStrategies {
-				opts.RobinhoodStrategies = append(opts.RobinhoodStrategies, s.ID)
-			}
+			opts.RobinhoodStrategies = []string{starterSpotStrategyID}
 		}
 		if opts.RobinhoodCapital == 0 {
 			opts.RobinhoodCapital = 500
@@ -1015,6 +1074,15 @@ func runInit(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	jsonFlag := fs.String("json", "", "JSON blob of InitOptions for non-interactive config generation")
 	outputFlag := fs.String("output", "scheduler/config.json", "output config file path")
+	profileFlag := ""
+	fs.StringVar(&profileFlag, "profile", "", "Non-interactive market profile: "+marketProfileUsage())
+	fs.StringVar(&profileFlag, "market-profile", "", "Alias for --profile")
+	assetsFlag := fs.String("assets", "", "Comma-separated crypto assets for --profile (for example BTC,ETH)")
+	stockSymbolsFlag := fs.String("stock-symbols", "", "Comma-separated direct stock/ETF symbols for --profile stocks, or option underlyings for --profile stock_options (for example SPY,QQQ,AAPL)")
+	modeFlag := fs.String("mode", "paper", "Execution mode for --profile live-capable platforms: paper or live")
+	futuresSymbolsFlag := ""
+	fs.StringVar(&futuresSymbolsFlag, "futures-symbols", "", "Comma-separated futures/FX symbols for --profile currency/fx or mixed (for example 6E,6J,ES)")
+	fs.StringVar(&futuresSymbolsFlag, "currency-symbols", "", "Alias for --futures-symbols")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
 		return 1
@@ -1022,6 +1090,39 @@ func runInit(args []string) int {
 
 	if *jsonFlag != "" {
 		return runInitFromJSON(*jsonFlag, *outputFlag)
+	}
+	if strings.TrimSpace(profileFlag) != "" {
+		profileMode := strings.ToLower(strings.TrimSpace(*modeFlag))
+		if profileMode == "" {
+			profileMode = "paper"
+		}
+		if profileMode != "paper" && profileMode != "live" {
+			fmt.Fprintf(os.Stderr, "Error: --mode must be paper or live, got %q\n", *modeFlag)
+			return 1
+		}
+		stockSymbols := splitCSVArg(*stockSymbolsFlag)
+		normalizedProfile := normalizeMarketProfile(profileFlag)
+		opts := InitOptions{
+			OutputPath:     *outputFlag,
+			MarketProfile:  profileFlag,
+			Assets:         splitCSVArg(*assetsFlag),
+			RobinhoodMode:  profileMode,
+			FuturesMode:    profileMode,
+			PerpsMode:      profileMode,
+			OKXMode:        profileMode,
+			FuturesSymbols: splitCSVArg(futuresSymbolsFlag),
+		}
+		if normalizedProfile == marketProfileStocks {
+			opts.RobinhoodSymbols = stockSymbols
+		} else {
+			opts.RobinhoodOptionsSymbols = stockSymbols
+		}
+		payload, err := json.Marshal(opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error marshaling --profile options: %v\n", err)
+			return 1
+		}
+		return runInitFromJSON(string(payload), *outputFlag)
 	}
 
 	discoverStrategies()
@@ -1043,7 +1144,7 @@ func runInit(args []string) int {
 	}
 
 	// Step 2: Market profile.
-	marketProfileLabels := []string{"crypto", "stocks", "fx", "mixed"}
+	marketProfileLabels := []string{"crypto", "stocks", "stock_options", "currency", "mixed"}
 	marketProfileIdx := p.Choice("\nMarket profile:", marketProfileLabels, 0)
 	marketProfile := marketProfileLabels[marketProfileIdx]
 
@@ -1140,7 +1241,19 @@ func runInit(args []string) int {
 		}
 	}
 
-	// Step 5b: Robinhood options stock symbols.
+	// Step 5b: Robinhood direct share symbols and options underlyings.
+	var robinhoodSymbols []string
+	if enableRobinhood {
+		symIdxs := p.MultiSelectWithDefaults("\nSelect stock/ETF symbols for Robinhood share trading:", supportedStockSymbols, selectionDefaults(supportedStockSymbols, []string{"SPY", "QQQ"}, false))
+		for _, idx := range symIdxs {
+			robinhoodSymbols = append(robinhoodSymbols, supportedStockSymbols[idx])
+		}
+		if len(robinhoodSymbols) == 0 {
+			robinhoodSymbols = []string{"SPY", "QQQ"}
+		}
+	}
+
+	// Step 5c: Robinhood options stock symbols.
 	var robinhoodOptionsSymbols []string
 	for _, plt := range optionPlatforms {
 		if plt == "robinhood" {
@@ -1427,12 +1540,11 @@ func runInit(args []string) int {
 		}
 	}
 
-	// Collect Robinhood strategy IDs (auto-selected from spot strategies).
+	// Collect Robinhood strategy IDs. Keep the stock-share starter focused and
+	// predictable: one momentum-style spot strategy per selected stock/ETF.
 	robinhoodStratIDs := make([]string, 0)
 	if enableRobinhood {
-		for _, s := range spotStrategies {
-			robinhoodStratIDs = append(robinhoodStratIDs, s.ID)
-		}
+		robinhoodStratIDs = []string{starterSpotStrategyID}
 	}
 
 	// Collect Luno strategy IDs.
@@ -1481,6 +1593,7 @@ func runInit(args []string) int {
 		OptionsDrawdown:           optionsDrawdown,
 		PerpsDrawdown:             perpsDrawdown,
 		RobinhoodOptionsSymbols:   robinhoodOptionsSymbols,
+		RobinhoodSymbols:          robinhoodSymbols,
 		EnableRobinhood:           enableRobinhood,
 		RobinhoodMode:             robinhoodMode,
 		RobinhoodStrategies:       robinhoodStratIDs,
