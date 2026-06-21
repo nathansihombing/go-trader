@@ -1079,6 +1079,7 @@ func runInit(args []string) int {
 	fs.StringVar(&profileFlag, "market-profile", "", "Alias for --profile")
 	assetsFlag := fs.String("assets", "", "Comma-separated crypto assets for --profile (for example BTC,ETH)")
 	stockSymbolsFlag := fs.String("stock-symbols", "", "Comma-separated direct stock/ETF symbols for --profile stocks, or option underlyings for --profile stock_options (for example SPY,QQQ,AAPL)")
+	modeFlag := fs.String("mode", "paper", "Execution mode for --profile live-capable platforms: paper or live")
 	futuresSymbolsFlag := ""
 	fs.StringVar(&futuresSymbolsFlag, "futures-symbols", "", "Comma-separated futures/FX symbols for --profile currency/fx or mixed (for example 6E,6J,ES)")
 	fs.StringVar(&futuresSymbolsFlag, "currency-symbols", "", "Alias for --futures-symbols")
@@ -1091,12 +1092,24 @@ func runInit(args []string) int {
 		return runInitFromJSON(*jsonFlag, *outputFlag)
 	}
 	if strings.TrimSpace(profileFlag) != "" {
+		profileMode := strings.ToLower(strings.TrimSpace(*modeFlag))
+		if profileMode == "" {
+			profileMode = "paper"
+		}
+		if profileMode != "paper" && profileMode != "live" {
+			fmt.Fprintf(os.Stderr, "Error: --mode must be paper or live, got %q\n", *modeFlag)
+			return 1
+		}
 		stockSymbols := splitCSVArg(*stockSymbolsFlag)
 		normalizedProfile := normalizeMarketProfile(profileFlag)
 		opts := InitOptions{
 			OutputPath:     *outputFlag,
 			MarketProfile:  profileFlag,
 			Assets:         splitCSVArg(*assetsFlag),
+			RobinhoodMode:  profileMode,
+			FuturesMode:    profileMode,
+			PerpsMode:      profileMode,
+			OKXMode:        profileMode,
 			FuturesSymbols: splitCSVArg(futuresSymbolsFlag),
 		}
 		if normalizedProfile == marketProfileStocks {

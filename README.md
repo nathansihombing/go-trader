@@ -60,6 +60,7 @@ For scripted deployments, use `--json`, or the lighter `--profile` shortcut for 
 ```bash
 ./go-trader init --json '{"assets":["BTC"],"enableSpot":true,"spotStrategies":["sma_crossover"],"spotCapital":1000,"spotDrawdown":10}' --output config.json
 ./go-trader init --profile stocks --stock-symbols AAPL,MSFT --output stocks.json
+./go-trader init --profile stocks --stock-symbols AAPL --mode live --output stocks-live.json
 ./go-trader init --profile stock_options --stock-symbols SPY,QQQ --output stock-options.json
 ./go-trader init --profile currency --currency-symbols 6E,6J --output currency.json
 ```

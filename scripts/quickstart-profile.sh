@@ -29,6 +29,7 @@ Environment:
   RUN_ONCE=1         Run one scheduler cycle after preflight.
   START=1            Start go-trader in the background after preflight.
   FORCE=1            Do not back up an existing output config first.
+  MODE=paper|live    Generate paper configs by default; live enables broker order mode and preflight credential checks.
   STATUS_PORT=8099   Port to poll when START=1.
   HEALTH_TIMEOUT=30  Seconds to wait for /health when START=1.
   GO_BIN=/path/go    Override Go binary.
@@ -43,6 +44,11 @@ fi
 profile="${1:-stocks}"
 symbols="${2:-}"
 output="${3:-scheduler/config.json}"
+mode="${MODE:-paper}"
+case "$mode" in
+  paper|live) ;;
+  *) echo "MODE must be paper or live, got: $mode" >&2; exit 2 ;;
+esac
 
 case "$profile" in
   stocks|stock|equities|equity|shares|stock_shares|stock-shares)
@@ -108,7 +114,7 @@ if [[ -f "$output" && "${FORCE:-0}" != "1" ]]; then
   cp "$output" "$backup"
   echo "Existing config backed up to $backup"
 fi
-./go-trader init --profile "$init_profile" "$symbol_flag" "$symbols" --output "$output"
+./go-trader init --profile "$init_profile" --mode "$mode" "$symbol_flag" "$symbols" --output "$output"
 
 preflight_flag="--preflight"
 if [[ "${STRICT:-0}" == "1" ]]; then
@@ -155,7 +161,7 @@ Quickstart config ready: $output
 Next commands:
   ./go-trader --config $output --preflight-json
   ./go-trader --config $output --once
-  START=1 bash scripts/quickstart-profile.sh $init_profile $symbols $output
+  MODE=$mode START=1 bash scripts/quickstart-profile.sh $init_profile $symbols $output
   ./go-trader --config $output
 
 Then inspect:

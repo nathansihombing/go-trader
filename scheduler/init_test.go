@@ -1769,6 +1769,39 @@ func TestRunInitProfileFlagStockOptionsCustomSymbols(t *testing.T) {
 	}
 }
 
+func TestRunInitProfileFlagStocksLiveMode(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "stocks-live.json")
+	code := runInit([]string{"--profile", "stocks", "--stock-symbols", "AAPL", "--mode", "live", "--output", out})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	if len(cfg.Strategies) != 1 {
+		t.Fatalf("expected one AAPL Robinhood share strategy, got %d", len(cfg.Strategies))
+	}
+	args := cfg.Strategies[0].Args
+	if len(args) < 4 || args[1] != "AAPL" || args[3] != "--mode=live" {
+		t.Fatalf("expected live AAPL Robinhood args, got %#v", args)
+	}
+}
+
+func TestRunInitProfileFlagRejectsUnknownMode(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "stocks.json")
+	code := runInit([]string{"--profile", "stocks", "--mode", "real", "--output", out})
+	if code == 0 {
+		t.Fatalf("expected invalid mode to fail")
+	}
+}
+
 func TestRunInitProfileFlagFXCustomSymbols(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "fx.json")

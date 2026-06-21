@@ -36,6 +36,18 @@ Pick **one** profile first. These commands generate paper/signal-first configs b
 
 This creates direct Robinhood stock-share strategies (`type: spot`, `platform: robinhood`) for SPY/QQQ. Live trading later requires Robinhood credentials, but paper/signal testing does not. If you want stock options instead of shares, use `--profile stock_options`.
 
+
+### Live field trial for one stock
+
+When the paper config looks sane, generate a one-symbol live config and let preflight catch missing credentials before any daemon starts:
+
+```bash
+MODE=live bash scripts/quickstart-profile.sh stocks AAPL /tmp/go-trader-aapl-live.json
+./go-trader --config /tmp/go-trader-aapl-live.json --preflight-strict
+```
+
+Before running continuously, edit the generated JSON to keep the stock strategy capital and portfolio drawdown very small for the first session.
+
 ### Currency / FX starter
 
 ```bash
